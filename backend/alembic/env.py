@@ -9,10 +9,9 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 
-# Importar todos os models aqui para que o autogenerate funcione
-# Adicionar novos imports conforme os models forem criados:
-# from app.models.tenant import Tenant  # noqa: F401
-# from app.models.user import User       # noqa: F401
+# Importar todos os models para que o autogenerate detecte as tabelas
+from app.models.tenant import Tenant  # noqa: F401
+from app.models.user import User  # noqa: F401
 
 config = context.config
 

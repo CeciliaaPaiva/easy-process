@@ -1,1 +1,15 @@
-# Schemas Pydantic — implementados progressivamente a partir da Sprint 1
+from app.schemas.auth import (
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+)
+
+__all__ = [
+    "RegisterRequest",
+    "LoginRequest",
+    "RefreshRequest",
+    "TokenResponse",
+    "UserResponse",
+]

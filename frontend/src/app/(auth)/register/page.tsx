@@ -10,7 +10,7 @@ import { api } from '@/lib/api'
 import { setTokens } from '@/lib/auth'
 import type { AuthResponse } from '@/types'
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -21,15 +21,22 @@ export default function LoginPage() {
     setLoading(true)
 
     const form = e.currentTarget
+    const name = (form.elements.namedItem('name') as HTMLInputElement).value
     const email = (form.elements.namedItem('email') as HTMLInputElement).value
     const password = (form.elements.namedItem('password') as HTMLInputElement).value
+    const company_name = (form.elements.namedItem('company_name') as HTMLInputElement).value
 
     try {
-      const data = await api.post<AuthResponse>('/api/v1/auth/login', { email, password })
+      const data = await api.post<AuthResponse>('/api/v1/auth/register', {
+        name,
+        email,
+        password,
+        company_name,
+      })
       setTokens(data.access_token, data.refresh_token)
       router.push('/projects')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao fazer login')
+      setError(err instanceof Error ? err.message : 'Erro ao criar conta')
     } finally {
       setLoading(false)
     }
@@ -37,11 +44,11 @@ export default function LoginPage() {
 
   return (
     <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-sm ring-1 ring-gray-200">
-      <h2 className="text-xl font-semibold text-gray-900">Entrar na sua conta</h2>
+      <h2 className="text-xl font-semibold text-gray-900">Criar conta</h2>
       <p className="mt-1 text-sm text-gray-500">
-        Não tem conta?{' '}
-        <Link href="/register" className="text-blue-600 hover:underline">
-          Criar conta
+        Já tem conta?{' '}
+        <Link href="/login" className="text-blue-600 hover:underline">
+          Entrar
         </Link>
       </p>
 
@@ -49,11 +56,30 @@ export default function LoginPage() {
         {error && <Alert message={error} />}
 
         <Input
+          id="name"
+          name="name"
+          type="text"
+          label="Seu nome"
+          placeholder="João Silva"
+          autoComplete="name"
+          required
+          minLength={2}
+        />
+        <Input
+          id="company_name"
+          name="company_name"
+          type="text"
+          label="Nome da empresa"
+          placeholder="Minha Empresa Ltda"
+          required
+          minLength={2}
+        />
+        <Input
           id="email"
           name="email"
           type="email"
-          label="E-mail"
-          placeholder="voce@empresa.com"
+          label="E-mail corporativo"
+          placeholder="joao@empresa.com"
           autoComplete="email"
           required
         />
@@ -62,14 +88,19 @@ export default function LoginPage() {
           name="password"
           type="password"
           label="Senha"
-          placeholder="••••••••"
-          autoComplete="current-password"
+          placeholder="Mínimo 6 caracteres"
+          autoComplete="new-password"
           required
+          minLength={6}
         />
 
         <Button type="submit" loading={loading} className="mt-2 w-full">
-          Entrar
+          Criar conta grátis
         </Button>
+
+        <p className="text-center text-xs text-gray-400">
+          Ao criar sua conta você concorda com os termos de uso.
+        </p>
       </form>
     </div>
   )
