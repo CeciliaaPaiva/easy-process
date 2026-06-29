@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -37,3 +38,23 @@ async def client(engine):
         yield c
 
     _app.dependency_overrides.clear()
+
+
+async def register_user(client: AsyncClient) -> dict:
+    uid = uuid.uuid4().hex[:8]
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": f"Test User {uid}",
+            "email": f"user_{uid}@test.com",
+            "password": "senha123",
+            "company_name": f"Empresa {uid}",
+        },
+    )
+    assert resp.status_code == 201, resp.json()
+    data = resp.json()
+    return {
+        "token": data["access_token"],
+        "headers": {"Authorization": f"Bearer {data['access_token']}"},
+        "user": data["user"],
+    }
