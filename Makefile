@@ -3,7 +3,8 @@
         lint lint-frontend lint-fix \
         migrate migration seed \
         shell-backend shell-db \
-        reset-db
+        reset-db \
+        deploy deploy-migrate
 
 # ─── Serviços ──────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,20 @@ reset-db:
 	@echo "Aguardando banco subir..."
 	@sleep 5
 	$(MAKE) migrate
+
+# ─── Deploy (produção) ────────────────────────────────────────────────────────
+
+deploy:
+	@echo "Subindo em produção..."
+	docker compose -f docker-compose.prod.yml pull
+	docker compose -f docker-compose.prod.yml up -d --build
+	docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+	@echo "Deploy concluído. Verificando saúde..."
+	@sleep 5
+	docker compose -f docker-compose.prod.yml ps
+
+deploy-migrate:
+	docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 # ─── Shells ───────────────────────────────────────────────────────────────────
 

@@ -16,6 +16,7 @@ import type { Process, ProcessVersion } from '@/types'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { ChatWindow } from '@/components/chat/ChatWindow'
+import { DocsPanel } from '@/components/bpmn/DocsPanel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/ui/dialog'
 
@@ -103,6 +104,7 @@ export default function ProcessPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showVersions, setShowVersions] = useState(false)
+  const [rightTab, setRightTab] = useState<'chat' | 'docs'>('chat')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadProcess = useCallback(async () => {
@@ -252,10 +254,31 @@ export default function ProcessPage() {
           )}
         </div>
 
-        {/* Chat Panel */}
+        {/* Right Panel: Chat + Docs tabs */}
         {isReady && (
           <div className="flex w-80 shrink-0 flex-col border-l border-gray-200 bg-white">
-            <ChatWindow processId={processId} onBpmnUpdate={handleBpmnUpdate} />
+            <div className="flex border-b border-gray-200">
+              {(['chat', 'docs'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setRightTab(tab)}
+                  className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                    rightTab === tab
+                      ? 'border-b-2 border-blue-600 text-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {tab === 'chat' ? 'Chat' : 'Documentação'}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {rightTab === 'chat' ? (
+                <ChatWindow processId={processId} onBpmnUpdate={handleBpmnUpdate} />
+              ) : (
+                <DocsPanel processId={processId} />
+              )}
+            </div>
           </div>
         )}
       </div>

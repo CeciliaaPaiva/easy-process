@@ -152,4 +152,41 @@ export const api = {
         body: JSON.stringify({ message }),
       }),
   },
+
+  docs: {
+    get: (processId: string) =>
+      request<{
+        process_id: string
+        description: string
+        activities: Record<string, unknown>[]
+        business_rules: string[]
+        decision_points: Record<string, unknown>[]
+        exceptions: string[]
+      }>(`/api/v1/processes/${processId}/docs`),
+    regenerate: (processId: string) =>
+      request<{
+        process_id: string
+        description: string
+        activities: Record<string, unknown>[]
+        business_rules: string[]
+        decision_points: Record<string, unknown>[]
+        exceptions: string[]
+      }>(`/api/v1/processes/${processId}/docs`, { method: 'POST' }),
+  },
+
+  tenants: {
+    members: () => request<User[]>('/api/v1/tenants/members'),
+    invite: (data: { email: string; name: string; role: string }) =>
+      request<User>('/api/v1/tenants/invite', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateMember: (id: string, role: string) =>
+      request<User>(`/api/v1/tenants/members/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ role }),
+      }),
+    removeMember: (id: string) =>
+      request<void>(`/api/v1/tenants/members/${id}`, { method: 'DELETE' }),
+  },
 }
