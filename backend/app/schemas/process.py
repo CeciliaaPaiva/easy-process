@@ -66,3 +66,12 @@ class ChatResponse(BaseModel):
     version: int
     user_message: ChatMessageResponse
     assistant_message: ChatMessageResponse
+
+
+class DocumentationResponse(BaseModel):
+    process_id: uuid.UUID
+    description: str
+    activities: list[dict]
+    business_rules: list[str]
+    decision_points: list[dict]
+    exceptions: list[str]

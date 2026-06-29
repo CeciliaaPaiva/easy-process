@@ -57,4 +57,6 @@ async def register_user(client: AsyncClient) -> dict:
         "token": data["access_token"],
         "headers": {"Authorization": f"Bearer {data['access_token']}"},
         "user": data["user"],
+        "email": f"user_{uid}@test.com",
+        "password": "senha123",
     }

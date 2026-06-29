@@ -25,6 +25,7 @@ from app.schemas.process import (
     ChatMessageResponse,
     ChatRequest,
     ChatResponse,
+    DocumentationResponse,
     ProcessResponse,
     ProcessStatusResponse,
     ProcessVersionResponse,
@@ -436,3 +437,40 @@ async def send_chat_message(
         user_message=ChatMessageResponse.model_validate(user_msg),
         assistant_message=ChatMessageResponse.model_validate(assistant_msg),
     )
+
+
+@router.get("/processes/{process_id}/docs", response_model=DocumentationResponse)
+async def get_process_docs(
+    process_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentationResponse:
+    from app.services.documentation import documentation_service
+
+    process = await _get_process_or_404(db, process_id, current_user.tenant_id)
+
+    if process.status != "ready" or not process.bpmn_xml:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Processo não está pronto. Status: {process.status}",
+        )
+
+    doc = await documentation_service.generate(process.bpmn_xml)
+
+    return DocumentationResponse(
+        process_id=process_id,
+        description=doc.description,
+        activities=doc.activities,
+        business_rules=doc.business_rules,
+        decision_points=doc.decision_points,
+        exceptions=doc.exceptions,
+    )
+
+
+@router.post("/processes/{process_id}/docs", response_model=DocumentationResponse)
+async def regenerate_process_docs(
+    process_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentationResponse:
+    return await get_process_docs(process_id, current_user, db)
