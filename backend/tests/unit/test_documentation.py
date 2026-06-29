@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,24 +25,28 @@ MOCK_DOC = {
 }
 
 
+def _make_gemini_response(text: str) -> MagicMock:
+    resp = MagicMock()
+    resp.text = text
+    return resp
+
+
 class TestDocumentationService:
     @pytest.fixture
     def service(self):
         return DocumentationService()
 
-    @pytest.mark.asyncio
-    async def test_generate_returns_structured_doc(self, service, mocker):
-        mock_content = mocker.MagicMock()
-        mock_content.text = json.dumps(MOCK_DOC)
-        mock_response = mocker.MagicMock()
-        mock_response.content = [mock_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
+    @pytest.fixture
+    def generate_mock(self, service, mocker):
+        return mocker.patch.object(
+            service._model,
+            "generate_content_async",
             new_callable=AsyncMock,
-            return_value=mock_response,
         )
+
+    @pytest.mark.asyncio
+    async def test_generate_returns_structured_doc(self, service, generate_mock):
+        generate_mock.return_value = _make_gemini_response(json.dumps(MOCK_DOC))
 
         result = await service.generate(VALID_BPMN)
 
@@ -62,36 +66,16 @@ class TestDocumentationService:
             await service.generate("   ")
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_on_invalid_json(self, service, mocker):
-        mock_content = mocker.MagicMock()
-        mock_content.text = "não é JSON"
-        mock_response = mocker.MagicMock()
-        mock_response.content = [mock_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        )
+    async def test_raises_runtime_error_on_invalid_json(self, service, generate_mock):
+        generate_mock.return_value = _make_gemini_response("não é JSON")
 
         with pytest.raises(RuntimeError, match="inválida"):
             await service.generate(VALID_BPMN)
 
     @pytest.mark.asyncio
-    async def test_handles_missing_fields_gracefully(self, service, mocker):
+    async def test_handles_missing_fields_gracefully(self, service, generate_mock):
         partial = {"description": "Processo sem atividades"}
-        mock_content = mocker.MagicMock()
-        mock_content.text = json.dumps(partial)
-        mock_response = mocker.MagicMock()
-        mock_response.content = [mock_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        )
+        generate_mock.return_value = _make_gemini_response(json.dumps(partial))
 
         result = await service.generate(VALID_BPMN)
         assert result.description == "Processo sem atividades"

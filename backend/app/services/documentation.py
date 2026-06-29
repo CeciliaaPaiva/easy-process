@@ -2,13 +2,13 @@ import json
 import logging
 from dataclasses import dataclass
 
-from anthropic import AsyncAnthropic
+import google.generativeai as genai
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = (
+_SYSTEM_INSTRUCTION = (
     "Você é um analista de processos de negócio especialista em BPMN. "
     "Analise o diagrama BPMN fornecido e gere documentação técnica completa em português. "
     "Responda SOMENTE com JSON válido, sem markdown, sem texto antes ou depois."
@@ -53,25 +53,26 @@ class ProcessDocumentation:
 
 class DocumentationService:
     def __init__(self) -> None:
-        self._client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self._model = genai.GenerativeModel(
+            "gemini-1.5-flash",
+            system_instruction=_SYSTEM_INSTRUCTION,
+        )
 
     async def generate(self, bpmn_xml: str) -> ProcessDocumentation:
         if not bpmn_xml or not bpmn_xml.strip():
             raise ValueError("BPMN XML não pode estar vazio")
 
-        response = await self._client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            system=_SYSTEM,
-            messages=[{"role": "user", "content": _PROMPT.format(bpmn_xml=bpmn_xml[:60_000])}],
+        response = await self._model.generate_content_async(
+            _PROMPT.format(bpmn_xml=bpmn_xml[:60_000])
         )
 
-        raw = response.content[0].text.strip()
+        raw = response.text.strip()
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
-            logger.error("Resposta da Claude não é JSON válido: %s", raw[:200])
+            logger.error("Resposta do Gemini não é JSON válido: %s", raw[:200])
             raise RuntimeError("Falha ao gerar documentação: resposta inválida da IA") from exc
 
         return ProcessDocumentation(

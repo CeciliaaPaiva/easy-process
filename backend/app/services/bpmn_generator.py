@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from anthropic import AsyncAnthropic
+import google.generativeai as genai
 
 from app.core.config import settings
 from app.services.bpmn_validator import validate_bpmn_xml
@@ -45,7 +45,8 @@ class BpmnGenerationResult:
 
 class BpmnGeneratorService:
     def __init__(self) -> None:
-        self._client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self._model = genai.GenerativeModel("gemini-1.5-flash")
 
     async def generate(
         self, transcription: str, max_retries: int = 3
@@ -53,18 +54,19 @@ class BpmnGeneratorService:
         if not transcription or len(transcription.strip()) < 50:
             raise ValueError("Transcrição muito curta ou vazia (mínimo 50 caracteres)")
 
+        chat = self._model.start_chat()
         initial_prompt = _GENERATION_PROMPT.format(transcription=transcription[:50_000])
-        messages: list[dict[str, str]] = [{"role": "user", "content": initial_prompt}]
         last_error = "formato inválido"
 
         for attempt in range(1, max_retries + 1):
-            response = await self._client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=8096,
-                messages=messages,
-            )
+            if attempt == 1:
+                response = await chat.send_message_async(initial_prompt)
+            else:
+                response = await chat.send_message_async(
+                    _RETRY_PROMPT.format(error=last_error)
+                )
 
-            raw = response.content[0].text
+            raw = response.text
             data = self._parse_json(raw)
 
             if data is not None:
@@ -80,12 +82,6 @@ class BpmnGeneratorService:
                 last_error = err
             else:
                 last_error = "JSON inválido na resposta"
-
-            if attempt < max_retries:
-                messages.append({"role": "assistant", "content": raw})
-                messages.append(
-                    {"role": "user", "content": _RETRY_PROMPT.format(error=last_error)}
-                )
 
         raise RuntimeError(
             f"Não foi possível gerar BPMN válido após {max_retries} tentativas. "

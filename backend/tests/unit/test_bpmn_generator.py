@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,24 +25,27 @@ MOCK_RESPONSE = {
 TRANSCRIPTION = "O analista recebe a solicitação e encaminha para aprovar."
 
 
+def _make_gemini_response(text: str) -> MagicMock:
+    resp = MagicMock()
+    resp.text = text
+    return resp
+
+
 class TestBpmnGeneratorService:
     @pytest.fixture
     def service(self):
         return BpmnGeneratorService()
 
+    @pytest.fixture
+    def mock_chat(self, service, mocker):
+        chat = MagicMock()
+        mocker.patch.object(service._model, "start_chat", return_value=chat)
+        return chat
+
     @pytest.mark.asyncio
-    async def test_generates_valid_bpmn(self, service, mocker):
-        mock_content = mocker.MagicMock()
-        mock_content.text = json.dumps(MOCK_RESPONSE)
-
-        mock_response = mocker.MagicMock()
-        mock_response.content = [mock_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            return_value=mock_response,
+    async def test_generates_valid_bpmn(self, service, mock_chat):
+        mock_chat.send_message_async = AsyncMock(
+            return_value=_make_gemini_response(json.dumps(MOCK_RESPONSE))
         )
 
         result = await service.generate(TRANSCRIPTION)
@@ -58,42 +61,23 @@ class TestBpmnGeneratorService:
             await service.generate("curto")
 
     @pytest.mark.asyncio
-    async def test_retries_on_invalid_bpmn_then_succeeds(self, service, mocker):
-        bad_content = mocker.MagicMock()
-        bad_content.text = (
-            '{"bpmn_xml": "not valid xml", "summary": "", "actors": [], "tasks": []}'
-        )
-        good_content = mocker.MagicMock()
-        good_content.text = json.dumps(MOCK_RESPONSE)
-
-        bad_resp = mocker.MagicMock()
-        bad_resp.content = [bad_content]
-        good_resp = mocker.MagicMock()
-        good_resp.content = [good_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            side_effect=[bad_resp, good_resp],
+    async def test_retries_on_invalid_bpmn_then_succeeds(self, service, mock_chat):
+        mock_chat.send_message_async = AsyncMock(
+            side_effect=[
+                _make_gemini_response(
+                    '{"bpmn_xml": "not valid xml", "summary": "", "actors": [], "tasks": []}'
+                ),
+                _make_gemini_response(json.dumps(MOCK_RESPONSE)),
+            ]
         )
 
         result = await service.generate(TRANSCRIPTION, max_retries=2)
         assert "startEvent" in result.bpmn_xml or "Start_1" in result.bpmn_xml
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_after_max_retries(self, service, mocker):
-        bad_content = mocker.MagicMock()
-        bad_content.text = "não é json"
-
-        bad_resp = mocker.MagicMock()
-        bad_resp.content = [bad_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            return_value=bad_resp,
+    async def test_raises_runtime_error_after_max_retries(self, service, mock_chat):
+        mock_chat.send_message_async = AsyncMock(
+            return_value=_make_gemini_response("não é json")
         )
 
         with pytest.raises(RuntimeError, match="tentativas"):

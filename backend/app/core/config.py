@@ -11,7 +11,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    ANTHROPIC_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    OLLAMA_BASE_URL: str = "http://ollama:11434"
+    OLLAMA_MODEL: str = "qwen2.5:14b"
+
     WHISPER_MODEL: str = "base"
 
     UPLOAD_DIR: str = "/data/uploads"

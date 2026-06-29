@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -21,24 +21,30 @@ MOCK_RESPONSE = {
 }
 
 
+def _make_openai_response(text: str) -> MagicMock:
+    choice = MagicMock()
+    choice.message.content = text
+    resp = MagicMock()
+    resp.choices = [choice]
+    return resp
+
+
 class TestBpmnRefinerService:
     @pytest.fixture
     def service(self):
         return BpmnRefinerService()
 
-    @pytest.mark.asyncio
-    async def test_refine_returns_valid_result(self, service, mocker):
-        mock_content = mocker.MagicMock()
-        mock_content.text = json.dumps(MOCK_RESPONSE)
-        mock_response = mocker.MagicMock()
-        mock_response.content = [mock_content]
-
-        mocker.patch.object(
-            service._client.messages,
+    @pytest.fixture
+    def create_mock(self, service, mocker):
+        return mocker.patch.object(
+            service._client.chat.completions,
             "create",
             new_callable=AsyncMock,
-            return_value=mock_response,
         )
+
+    @pytest.mark.asyncio
+    async def test_refine_returns_valid_result(self, service, create_mock):
+        create_mock.return_value = _make_openai_response(json.dumps(MOCK_RESPONSE))
 
         result = await service.refine(
             bpmn_xml=VALID_BPMN,
@@ -58,18 +64,8 @@ class TestBpmnRefinerService:
             await service.refine(bpmn_xml=VALID_BPMN, instruction="  ", history=[])
 
     @pytest.mark.asyncio
-    async def test_includes_history_in_messages(self, service, mocker):
-        mock_content = mocker.MagicMock()
-        mock_content.text = json.dumps(MOCK_RESPONSE)
-        mock_response = mocker.MagicMock()
-        mock_response.content = [mock_content]
-
-        create_mock = mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        )
+    async def test_includes_history_in_messages(self, service, create_mock):
+        create_mock.return_value = _make_openai_response(json.dumps(MOCK_RESPONSE))
 
         history = [
             {"role": "user", "content": "Mensagem anterior"},
@@ -82,47 +78,27 @@ class TestBpmnRefinerService:
             history=history,
         )
 
+        # messages kwarg = [system, history[0], history[1], new_user_prompt]
         call_messages = create_mock.call_args.kwargs["messages"]
-        assert call_messages[0]["role"] == "user"
-        assert call_messages[0]["content"] == "Mensagem anterior"
-        assert call_messages[1]["role"] == "assistant"
-        assert len(call_messages) == 3  # 2 history + 1 nova mensagem com prompt
+        assert call_messages[0]["role"] == "system"
+        assert call_messages[1]["role"] == "user"
+        assert call_messages[1]["content"] == "Mensagem anterior"
+        assert call_messages[2]["role"] == "assistant"
+        assert len(call_messages) == 4  # system + 2 history + 1 nova mensagem
 
     @pytest.mark.asyncio
-    async def test_retries_on_invalid_bpmn(self, service, mocker):
-        bad_content = mocker.MagicMock()
-        bad_content.text = '{"bpmn_xml": "invalid", "change_description": ""}'
-        good_content = mocker.MagicMock()
-        good_content.text = json.dumps(MOCK_RESPONSE)
-
-        bad_resp = mocker.MagicMock()
-        bad_resp.content = [bad_content]
-        good_resp = mocker.MagicMock()
-        good_resp.content = [good_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            side_effect=[bad_resp, good_resp],
-        )
+    async def test_retries_on_invalid_bpmn(self, service, create_mock):
+        create_mock.side_effect = [
+            _make_openai_response('{"bpmn_xml": "invalid", "change_description": ""}'),
+            _make_openai_response(json.dumps(MOCK_RESPONSE)),
+        ]
 
         result = await service.refine(VALID_BPMN, "instrução", [], max_retries=2)
         assert "startEvent" in result.bpmn_xml
 
     @pytest.mark.asyncio
-    async def test_raises_after_max_retries(self, service, mocker):
-        bad_content = mocker.MagicMock()
-        bad_content.text = "não é json"
-        bad_resp = mocker.MagicMock()
-        bad_resp.content = [bad_content]
-
-        mocker.patch.object(
-            service._client.messages,
-            "create",
-            new_callable=AsyncMock,
-            return_value=bad_resp,
-        )
+    async def test_raises_after_max_retries(self, service, create_mock):
+        create_mock.return_value = _make_openai_response("não é json")
 
         with pytest.raises(RuntimeError, match="tentativas"):
             await service.refine(VALID_BPMN, "instrução", [], max_retries=2)

@@ -11,6 +11,9 @@
 up:
 	docker compose up -d
 
+ollama-pull:
+	docker compose exec ollama ollama pull qwen2.5:14b
+
 down:
 	docker compose down
 

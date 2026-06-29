@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.services.bpmn_validator import validate_bpmn_xml
@@ -41,7 +41,11 @@ class BpmnRefinementResult:
 
 class BpmnRefinerService:
     def __init__(self) -> None:
-        self._client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self._client = AsyncOpenAI(
+            base_url=f"{settings.OLLAMA_BASE_URL}/v1",
+            api_key="ollama",
+        )
+        self._model = settings.OLLAMA_MODEL
 
     async def refine(
         self,
@@ -66,14 +70,12 @@ class BpmnRefinerService:
         last_error = "formato inválido"
 
         for attempt in range(1, max_retries + 1):
-            response = await self._client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=8096,
-                system=_REFINER_SYSTEM,
-                messages=messages,
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[{"role": "system", "content": _REFINER_SYSTEM}, *messages],
             )
 
-            raw = response.content[0].text
+            raw = (response.choices[0].message.content or "").strip()
             data = self._parse_json(raw)
 
             if data is not None:
