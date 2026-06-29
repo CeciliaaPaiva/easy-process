@@ -19,8 +19,12 @@ from app.core.database import get_db
 from app.models.process import Process, ProcessVersion
 from app.models.project import Project
 from app.models.user import User
+from app.models.process import ChatMessage
 from app.schemas.process import (
     BpmnUpdateRequest,
+    ChatMessageResponse,
+    ChatRequest,
+    ChatResponse,
     ProcessResponse,
     ProcessStatusResponse,
     ProcessVersionResponse,
@@ -246,4 +250,189 @@ async def export_bpmn(
         content=process.bpmn_xml,
         media_type="application/xml",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/processes/{process_id}/versions/{version_number}",
+    response_model=ProcessVersionResponse,
+)
+async def get_process_version(
+    process_id: uuid.UUID,
+    version_number: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessVersionResponse:
+    await _get_process_or_404(db, process_id, current_user.tenant_id)
+
+    result = await db.execute(
+        select(ProcessVersion).where(
+            ProcessVersion.process_id == process_id,
+            ProcessVersion.version == version_number,
+        )
+    )
+    version = result.scalar_one_or_none()
+    if not version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Versão {version_number} não encontrada",
+        )
+    return ProcessVersionResponse.model_validate(version)
+
+
+@router.post(
+    "/processes/{process_id}/versions/{version_number}/restore",
+    response_model=ProcessResponse,
+)
+async def restore_process_version(
+    process_id: uuid.UUID,
+    version_number: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessResponse:
+    from app.services.bpmn_validator import validate_bpmn_xml
+
+    process = await _get_process_or_404(db, process_id, current_user.tenant_id)
+
+    result = await db.execute(
+        select(ProcessVersion).where(
+            ProcessVersion.process_id == process_id,
+            ProcessVersion.version == version_number,
+        )
+    )
+    old_version = result.scalar_one_or_none()
+    if not old_version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Versão {version_number} não encontrada",
+        )
+
+    valid, err = validate_bpmn_xml(old_version.bpmn_xml)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"BPMN da versão {version_number} inválido: {err}",
+        )
+
+    process.version += 1
+    process.bpmn_xml = old_version.bpmn_xml
+
+    new_version = ProcessVersion(
+        process_id=process_id,
+        version=process.version,
+        bpmn_xml=old_version.bpmn_xml,
+        change_description=f"Restaurado da versão {version_number}",
+    )
+    db.add(new_version)
+    await db.commit()
+    await db.refresh(process)
+    return ProcessResponse.model_validate(process)
+
+
+@router.get(
+    "/processes/{process_id}/chat",
+    response_model=list[ChatMessageResponse],
+)
+async def get_chat_history(
+    process_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ChatMessageResponse]:
+    await _get_process_or_404(db, process_id, current_user.tenant_id)
+
+    rows = (
+        (
+            await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.process_id == process_id)
+                .order_by(ChatMessage.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [ChatMessageResponse.model_validate(m) for m in rows]
+
+
+@router.post("/processes/{process_id}/chat", response_model=ChatResponse)
+async def send_chat_message(
+    process_id: uuid.UUID,
+    data: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChatResponse:
+    from app.services.bpmn_refiner import bpmn_refiner_service
+
+    process = await _get_process_or_404(db, process_id, current_user.tenant_id)
+
+    if process.status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Processo não está pronto para refinamento. Status: {process.status}",
+        )
+    if not process.bpmn_xml:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="BPMN não disponível",
+        )
+
+    history_rows = (
+        (
+            await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.process_id == process_id)
+                .order_by(ChatMessage.created_at.asc())
+                .limit(40)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    history = [{"role": m.role, "content": m.content} for m in history_rows[-20:]]
+
+    user_msg = ChatMessage(
+        process_id=process_id,
+        role="user",
+        content=data.message,
+        bpmn_version=process.version,
+    )
+    db.add(user_msg)
+    await db.flush()
+
+    result = await bpmn_refiner_service.refine(
+        bpmn_xml=process.bpmn_xml,
+        instruction=data.message,
+        history=history,
+    )
+
+    process.version += 1
+    process.bpmn_xml = result.bpmn_xml
+
+    new_version = ProcessVersion(
+        process_id=process_id,
+        version=process.version,
+        bpmn_xml=result.bpmn_xml,
+        change_description=result.change_description,
+    )
+    db.add(new_version)
+
+    assistant_msg = ChatMessage(
+        process_id=process_id,
+        role="assistant",
+        content=result.change_description,
+        bpmn_version=process.version,
+    )
+    db.add(assistant_msg)
+
+    await db.commit()
+    await db.refresh(process)
+    await db.refresh(user_msg)
+    await db.refresh(assistant_msg)
+
+    return ChatResponse(
+        bpmn_xml=result.bpmn_xml,
+        change_description=result.change_description,
+        version=process.version,
+        user_message=ChatMessageResponse.model_validate(user_msg),
+        assistant_message=ChatMessageResponse.model_validate(assistant_msg),
     )

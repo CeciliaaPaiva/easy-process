@@ -8,6 +8,8 @@ from app.schemas.auth import (
 from app.schemas.process import (
     BpmnUpdateRequest,
     ChatMessageResponse,
+    ChatRequest,
+    ChatResponse,
     ProcessResponse,
     ProcessStatusResponse,
     ProcessVersionResponse,
@@ -34,4 +36,6 @@ __all__ = [
     "ProcessVersionResponse",
     "BpmnUpdateRequest",
     "ChatMessageResponse",
+    "ChatRequest",
+    "ChatResponse",
 ]

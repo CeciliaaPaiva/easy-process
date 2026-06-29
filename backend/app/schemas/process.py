@@ -54,3 +54,15 @@ class ChatMessageResponse(BaseModel):
     content: str
     bpmn_version: int | None
     created_at: datetime
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+class ChatResponse(BaseModel):
+    bpmn_xml: str
+    change_description: str
+    version: int
+    user_message: ChatMessageResponse
+    assistant_message: ChatMessageResponse
