@@ -12,8 +12,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     GEMINI_API_KEY: str = ""
-    OLLAMA_BASE_URL: str = "http://ollama:11434"
-    OLLAMA_MODEL: str = "qwen2.5:14b"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
 
     WHISPER_MODEL: str = "base"
 

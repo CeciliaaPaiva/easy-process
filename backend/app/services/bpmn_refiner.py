@@ -4,7 +4,8 @@ import json
 import re
 from dataclasses import dataclass
 
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 
 from app.core.config import settings
 from app.services.bpmn_validator import validate_bpmn_xml
@@ -41,11 +42,8 @@ class BpmnRefinementResult:
 
 class BpmnRefinerService:
     def __init__(self) -> None:
-        self._client = AsyncOpenAI(
-            base_url=f"{settings.OLLAMA_BASE_URL}/v1",
-            api_key="ollama",
-        )
-        self._model = settings.OLLAMA_MODEL
+        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self._model_name = "gemini-2.0-flash"
 
     async def refine(
         self,
@@ -57,25 +55,29 @@ class BpmnRefinerService:
         if not bpmn_xml or not instruction.strip():
             raise ValueError("BPMN e instrução são obrigatórios")
 
-        messages: list[dict[str, str]] = list(history)
-        messages.append(
-            {
-                "role": "user",
-                "content": _REFINER_PROMPT.format(
-                    bpmn_xml=bpmn_xml, instruction=instruction
-                ),
-            }
-        )
+        # Converte histórico: "assistant" → "model" (formato Gemini)
+        contents: list[types.Content] = [
+            types.Content(
+                role="model" if msg["role"] == "assistant" else "user",
+                parts=[types.Part(text=msg["content"])],
+            )
+            for msg in history
+        ]
+
+        user_prompt = _REFINER_PROMPT.format(bpmn_xml=bpmn_xml, instruction=instruction)
+        contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
 
         last_error = "formato inválido"
+        config = types.GenerateContentConfig(system_instruction=_REFINER_SYSTEM)
 
         for attempt in range(1, max_retries + 1):
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[{"role": "system", "content": _REFINER_SYSTEM}, *messages],
+            response = await self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=contents,
+                config=config,
             )
 
-            raw = (response.choices[0].message.content or "").strip()
+            raw = (response.text or "").strip()
             data = self._parse_json(raw)
 
             if data is not None:
@@ -91,12 +93,12 @@ class BpmnRefinerService:
                 last_error = "JSON inválido na resposta"
 
             if attempt < max_retries:
-                messages.append({"role": "assistant", "content": raw})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": _RETRY_PROMPT.format(error=last_error),
-                    }
+                contents.append(types.Content(role="model", parts=[types.Part(text=raw)]))
+                contents.append(
+                    types.Content(
+                        role="user",
+                        parts=[types.Part(text=_RETRY_PROMPT.format(error=last_error))],
+                    )
                 )
 
         raise RuntimeError(

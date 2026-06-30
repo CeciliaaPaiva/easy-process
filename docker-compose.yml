@@ -28,20 +28,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      ollama:
-        condition: service_started
     networks:
       - app-network
-
-  ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - app-network
-    restart: unless-stopped
 
   db:
     image: postgres:16-alpine
@@ -64,7 +52,6 @@ services:
 volumes:
   pgdata:
   uploads:
-  ollama_data:
 
 networks:
   app-network:

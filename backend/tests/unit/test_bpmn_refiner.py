@@ -21,11 +21,9 @@ MOCK_RESPONSE = {
 }
 
 
-def _make_openai_response(text: str) -> MagicMock:
-    choice = MagicMock()
-    choice.message.content = text
+def _make_gemini_response(text: str) -> MagicMock:
     resp = MagicMock()
-    resp.choices = [choice]
+    resp.text = text
     return resp
 
 
@@ -35,16 +33,16 @@ class TestBpmnRefinerService:
         return BpmnRefinerService()
 
     @pytest.fixture
-    def create_mock(self, service, mocker):
+    def generate_mock(self, service, mocker):
         return mocker.patch.object(
-            service._client.chat.completions,
-            "create",
+            service._client.aio.models,
+            "generate_content",
             new_callable=AsyncMock,
         )
 
     @pytest.mark.asyncio
-    async def test_refine_returns_valid_result(self, service, create_mock):
-        create_mock.return_value = _make_openai_response(json.dumps(MOCK_RESPONSE))
+    async def test_refine_returns_valid_result(self, service, generate_mock):
+        generate_mock.return_value = _make_gemini_response(json.dumps(MOCK_RESPONSE))
 
         result = await service.refine(
             bpmn_xml=VALID_BPMN,
@@ -64,8 +62,8 @@ class TestBpmnRefinerService:
             await service.refine(bpmn_xml=VALID_BPMN, instruction="  ", history=[])
 
     @pytest.mark.asyncio
-    async def test_includes_history_in_messages(self, service, create_mock):
-        create_mock.return_value = _make_openai_response(json.dumps(MOCK_RESPONSE))
+    async def test_includes_history_in_contents(self, service, generate_mock):
+        generate_mock.return_value = _make_gemini_response(json.dumps(MOCK_RESPONSE))
 
         history = [
             {"role": "user", "content": "Mensagem anterior"},
@@ -78,27 +76,26 @@ class TestBpmnRefinerService:
             history=history,
         )
 
-        # messages kwarg = [system, history[0], history[1], new_user_prompt]
-        call_messages = create_mock.call_args.kwargs["messages"]
-        assert call_messages[0]["role"] == "system"
-        assert call_messages[1]["role"] == "user"
-        assert call_messages[1]["content"] == "Mensagem anterior"
-        assert call_messages[2]["role"] == "assistant"
-        assert len(call_messages) == 4  # system + 2 history + 1 nova mensagem
+        call_contents = generate_mock.call_args.kwargs["contents"]
+        # history[0] user, history[1] model, + new user prompt = 3
+        assert len(call_contents) == 3
+        assert call_contents[0].role == "user"
+        assert call_contents[0].parts[0].text == "Mensagem anterior"
+        assert call_contents[1].role == "model"
 
     @pytest.mark.asyncio
-    async def test_retries_on_invalid_bpmn(self, service, create_mock):
-        create_mock.side_effect = [
-            _make_openai_response('{"bpmn_xml": "invalid", "change_description": ""}'),
-            _make_openai_response(json.dumps(MOCK_RESPONSE)),
+    async def test_retries_on_invalid_bpmn(self, service, generate_mock):
+        generate_mock.side_effect = [
+            _make_gemini_response('{"bpmn_xml": "invalid", "change_description": ""}'),
+            _make_gemini_response(json.dumps(MOCK_RESPONSE)),
         ]
 
         result = await service.refine(VALID_BPMN, "instrução", [], max_retries=2)
         assert "startEvent" in result.bpmn_xml
 
     @pytest.mark.asyncio
-    async def test_raises_after_max_retries(self, service, create_mock):
-        create_mock.return_value = _make_openai_response("não é json")
+    async def test_raises_after_max_retries(self, service, generate_mock):
+        generate_mock.return_value = _make_gemini_response("não é json")
 
         with pytest.raises(RuntimeError, match="tentativas"):
             await service.refine(VALID_BPMN, "instrução", [], max_retries=2)
