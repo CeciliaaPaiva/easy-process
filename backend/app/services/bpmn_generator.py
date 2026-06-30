@@ -2,7 +2,8 @@ import json
 import re
 from dataclasses import dataclass, field
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from app.core.config import settings
 from app.services.bpmn_validator import validate_bpmn_xml
@@ -45,8 +46,8 @@ class BpmnGenerationResult:
 
 class BpmnGeneratorService:
     def __init__(self) -> None:
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self._model = genai.GenerativeModel("gemini-1.5-flash")
+        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self._model_name = "gemini-2.0-flash"
 
     async def generate(
         self, transcription: str, max_retries: int = 3
@@ -54,18 +55,18 @@ class BpmnGeneratorService:
         if not transcription or len(transcription.strip()) < 50:
             raise ValueError("Transcrição muito curta ou vazia (mínimo 50 caracteres)")
 
-        chat = self._model.start_chat()
+        messages: list[types.Content] = []
         initial_prompt = _GENERATION_PROMPT.format(transcription=transcription[:50_000])
         last_error = "formato inválido"
 
         for attempt in range(1, max_retries + 1):
-            if attempt == 1:
-                response = await chat.send_message_async(initial_prompt)
-            else:
-                response = await chat.send_message_async(
-                    _RETRY_PROMPT.format(error=last_error)
-                )
+            user_msg = initial_prompt if attempt == 1 else _RETRY_PROMPT.format(error=last_error)
+            messages.append(types.Content(role="user", parts=[types.Part(text=user_msg)]))
 
+            response = await self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=messages,
+            )
             raw = response.text
             data = self._parse_json(raw)
 

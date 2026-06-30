@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
@@ -38,12 +38,12 @@ class Process(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
+        default=lambda: datetime.utcnow(),
+        onupdate=lambda: datetime.utcnow(),
         nullable=False,
     )
 
@@ -59,7 +59,7 @@ class ProcessVersion(Base):
     bpmn_xml: Mapped[str] = mapped_column(Text, nullable=False)
     change_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
 
 
@@ -74,5 +74,5 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     bpmn_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )

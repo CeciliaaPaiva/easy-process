@@ -2,7 +2,8 @@ import json
 import logging
 from dataclasses import dataclass
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from app.core.config import settings
 
@@ -53,18 +54,17 @@ class ProcessDocumentation:
 
 class DocumentationService:
     def __init__(self) -> None:
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self._model = genai.GenerativeModel(
-            "gemini-1.5-flash",
-            system_instruction=_SYSTEM_INSTRUCTION,
-        )
+        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self._model_name = "gemini-2.0-flash"
 
     async def generate(self, bpmn_xml: str) -> ProcessDocumentation:
         if not bpmn_xml or not bpmn_xml.strip():
             raise ValueError("BPMN XML não pode estar vazio")
 
-        response = await self._model.generate_content_async(
-            _PROMPT.format(bpmn_xml=bpmn_xml[:60_000])
+        response = await self._client.aio.models.generate_content(
+            model=self._model_name,
+            contents=_PROMPT.format(bpmn_xml=bpmn_xml[:60_000]),
+            config=types.GenerateContentConfig(system_instruction=_SYSTEM_INSTRUCTION),
         )
 
         raw = response.text.strip()

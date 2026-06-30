@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
@@ -85,7 +85,7 @@ async def invite_member(
         role=data.role,
         password_hash=hash_password(temp_password),
         is_active=True,
-        created_at=datetime.now(UTC),
+        created_at=datetime.utcnow(),
     )
     db.add(new_user)
     await db.commit()
