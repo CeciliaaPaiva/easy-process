@@ -39,8 +39,8 @@ class TestDocumentationService:
     @pytest.fixture
     def generate_mock(self, service, mocker):
         return mocker.patch.object(
-            service._model,
-            "generate_content_async",
+            service._client.aio.models,
+            "generate_content",
             new_callable=AsyncMock,
         )
 

@@ -2,7 +2,7 @@
 
 Plataforma SaaS B2B que transforma entrevistas em áudio em diagramas BPMN completos usando IA.
 
-**Fluxo:** Upload de áudio → Transcrição (Whisper) → Geração de BPMN (Claude API) → Refinamento via chat
+**Fluxo:** Upload de áudio → Transcrição (Gemini) → Geração de BPMN (Gemini) → Refinamento via chat
 
 ---
 
@@ -10,7 +10,7 @@ Plataforma SaaS B2B que transforma entrevistas em áudio em diagramas BPMN compl
 
 - [Docker](https://docs.docker.com/get-docker/) 24+
 - [Docker Compose](https://docs.docker.com/compose/install/) v2+
-- Chave da [Anthropic API](https://console.anthropic.com/) (para geração de BPMN)
+- Chave da [Gemini API](https://aistudio.google.com/app/apikey) (para transcrição, geração de BPMN e chat)
 
 ---
 
@@ -85,8 +85,7 @@ make test-cov-html
 |----------|-----------|--------|
 | `DATABASE_URL` | URL de conexão com PostgreSQL | `postgresql+asyncpg://user:pass@db:5432/bpmn_platform` |
 | `JWT_SECRET` | Chave secreta para assinar tokens JWT | — (obrigatório) |
-| `ANTHROPIC_API_KEY` | Chave da API da Anthropic | — (obrigatório) |
-| `WHISPER_MODEL` | Modelo Whisper (`tiny`, `base`, `small`) | `base` |
+| `GEMINI_API_KEY` | Chave da API do Gemini | — (obrigatório) |
 | `UPLOAD_DIR` | Diretório de uploads de áudio | `/data/uploads` |
 | `MAX_UPLOAD_SIZE_MB` | Tamanho máximo do áudio em MB | `100` |
 | `CORS_ORIGINS` | Origens permitidas pelo CORS | `["http://localhost:3000"]` |
@@ -105,7 +104,7 @@ easy-process/
 │   │   ├── models/    # SQLAlchemy ORM
 │   │   ├── schemas/   # Pydantic request/response
 │   │   ├── api/v1/    # Endpoints
-│   │   ├── services/  # Lógica de negócio (Whisper, Claude, BPMN)
+│   │   ├── services/  # Lógica de negócio (transcrição, Gemini, BPMN)
 │   │   └── workers/   # Pipeline assíncrono
 │   ├── alembic/       # Migrations versionadas
 │   └── tests/         # pytest (unit, integration, e2e)

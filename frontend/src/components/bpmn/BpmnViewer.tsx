@@ -2,6 +2,10 @@
 
 import { useEffect, useRef } from 'react'
 
+import 'bpmn-js/dist/assets/diagram-js.css'
+import 'bpmn-js/dist/assets/bpmn-js.css'
+import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css'
+
 interface Props {
   xml: string
   className?: string

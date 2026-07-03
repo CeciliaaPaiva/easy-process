@@ -17,6 +17,33 @@ Analise a transcrição de uma entrevista e gere:
 3. Lista de atores/participantes identificados
 4. Lista de tarefas com responsável
 
+IMPORTANTE sobre IDs: cada elemento no XML deve ter um id único. Os elementos de
+diagrama (bpmndi:BPMNShape e bpmndi:BPMNEdge) NUNCA podem reutilizar o id do
+elemento semântico que representam — use um id diferente, ex: BPMNEdge
+id="Edge_SequenceFlow_1" bpmnElement="SequenceFlow_1" (não id="SequenceFlow_1").
+
+REGRAS DE LAYOUT (BPMNDI) — siga exatamente para as setas nunca cruzarem por
+cima das formas:
+- Fluxo principal em uma ÚNICA linha horizontal (mesmo y para todos os
+  elementos do caminho principal); só use uma segunda linha (offset vertical
+  de pelo menos 150px) para ramos alternativos de gateways.
+- Tamanhos fixos: startEvent/endEvent = 36x36; task = 100x80;
+  exclusiveGateway = 50x50.
+- Espaçamento horizontal fixo de 150px entre o fim de uma forma e o início da
+  próxima (ex: task em x=200 largura 100 termina em x=300; a próxima forma
+  começa em x=450).
+- Alinhe verticalmente pelo centro: todas as formas da mesma linha devem ter
+  o centro vertical (y + altura/2) idêntico.
+- Waypoints de bpmndi:BPMNEdge devem sair do centro da borda DIREITA da forma
+  de origem (x_origem + largura, y_origem + altura/2) e entrar no centro da
+  borda ESQUERDA da forma de destino (x_destino, y_destino + altura/2) — uma
+  linha reta horizontal, sem desvios, quando ambas estão na mesma linha.
+- NUNCA posicione uma forma cujo retângulo (x, y, largura, altura) sobreponha
+  o retângulo de outra forma ou o caminho de uma aresta.
+- NÃO adicione atributos de cor/estilo (ex: bioc:stroke, bioc:fill, cor de
+  destaque) nem qualquer namespace que não esteja declarado no elemento raiz
+  bpmn:definitions. Use apenas os namespaces bpmn, bpmndi, dc e di.
+
 TRANSCRIÇÃO:
 {transcription}
 
@@ -47,7 +74,7 @@ class BpmnGenerationResult:
 class BpmnGeneratorService:
     def __init__(self) -> None:
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._model_name = "gemini-2.0-flash"
+        self._model_name = settings.GEMINI_MODEL
 
     async def generate(
         self, transcription: str, max_retries: int = 3

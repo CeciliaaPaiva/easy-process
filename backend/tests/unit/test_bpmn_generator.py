@@ -37,16 +37,15 @@ class TestBpmnGeneratorService:
         return BpmnGeneratorService()
 
     @pytest.fixture
-    def mock_chat(self, service, mocker):
-        chat = MagicMock()
-        mocker.patch.object(service._model, "start_chat", return_value=chat)
-        return chat
+    def mock_generate(self, service, mocker):
+        mock = mocker.patch.object(
+            service._client.aio.models, "generate_content", new=AsyncMock()
+        )
+        return mock
 
     @pytest.mark.asyncio
-    async def test_generates_valid_bpmn(self, service, mock_chat):
-        mock_chat.send_message_async = AsyncMock(
-            return_value=_make_gemini_response(json.dumps(MOCK_RESPONSE))
-        )
+    async def test_generates_valid_bpmn(self, service, mock_generate):
+        mock_generate.return_value = _make_gemini_response(json.dumps(MOCK_RESPONSE))
 
         result = await service.generate(TRANSCRIPTION)
 
@@ -61,24 +60,20 @@ class TestBpmnGeneratorService:
             await service.generate("curto")
 
     @pytest.mark.asyncio
-    async def test_retries_on_invalid_bpmn_then_succeeds(self, service, mock_chat):
-        mock_chat.send_message_async = AsyncMock(
-            side_effect=[
-                _make_gemini_response(
-                    '{"bpmn_xml": "not valid xml", "summary": "", "actors": [], "tasks": []}'
-                ),
-                _make_gemini_response(json.dumps(MOCK_RESPONSE)),
-            ]
-        )
+    async def test_retries_on_invalid_bpmn_then_succeeds(self, service, mock_generate):
+        mock_generate.side_effect = [
+            _make_gemini_response(
+                '{"bpmn_xml": "not valid xml", "summary": "", "actors": [], "tasks": []}'
+            ),
+            _make_gemini_response(json.dumps(MOCK_RESPONSE)),
+        ]
 
         result = await service.generate(TRANSCRIPTION, max_retries=2)
         assert "startEvent" in result.bpmn_xml or "Start_1" in result.bpmn_xml
 
     @pytest.mark.asyncio
-    async def test_raises_runtime_error_after_max_retries(self, service, mock_chat):
-        mock_chat.send_message_async = AsyncMock(
-            return_value=_make_gemini_response("não é json")
-        )
+    async def test_raises_runtime_error_after_max_retries(self, service, mock_generate):
+        mock_generate.return_value = _make_gemini_response("não é json")
 
         with pytest.raises(RuntimeError, match="tentativas"):
             await service.generate(TRANSCRIPTION, max_retries=2)

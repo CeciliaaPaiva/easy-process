@@ -1,9 +1,36 @@
-from __future__ import annotations
-
-import asyncio
+import json
+import logging
+import mimetypes
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+
+from google import genai
+from google.genai import types
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+_SYSTEM_INSTRUCTION = (
+    "Você é um transcritor de áudio especialista em português do Brasil. "
+    "Transcreva o áudio fornecido literalmente, palavra por palavra. "
+    "Responda SOMENTE com JSON válido, sem markdown, sem texto antes ou depois."
+)
+
+_PROMPT = """\
+Transcreva o áudio a seguir e retorne um JSON com a seguinte estrutura:
+{
+  "text": "transcrição completa do áudio",
+  "language": "código do idioma detectado, ex: pt",
+  "duration": duração aproximada do áudio em segundos (número)
+}"""
+
+_MIME_TYPES = {
+    ".mp3": "audio/mp3",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+}
 
 
 @dataclass
@@ -22,46 +49,47 @@ class TranscriptionResult:
 
 
 class TranscriptionService:
-    _model: Any = None
+    def __init__(self) -> None:
+        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self._model_name = settings.GEMINI_MODEL
 
-    def _load_model(self) -> Any:
-        if self._model is None:
-            try:
-                import whisper  # type: ignore[import-untyped]
-
-                from app.core.config import settings
-
-                self._model = whisper.load_model(settings.WHISPER_MODEL)
-            except ImportError as exc:
-                raise RuntimeError(
-                    "openai-whisper não está instalado. "
-                    "Execute no container: pip install openai-whisper"
-                ) from exc
-        return self._model
+    def _mime_type(self, path: Path) -> str:
+        mime_type = _MIME_TYPES.get(path.suffix.lower())
+        if mime_type:
+            return mime_type
+        guessed, _ = mimetypes.guess_type(path.name)
+        return guessed or "audio/mpeg"
 
     async def transcribe(self, audio_path: str) -> TranscriptionResult:
         path = Path(audio_path)
         if not path.exists():
             raise FileNotFoundError(f"Arquivo não encontrado: {audio_path}")
 
-        model = self._load_model()
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: model.transcribe(str(path), language="pt"),
+        audio_bytes = path.read_bytes()
+        audio_part = types.Part.from_bytes(
+            data=audio_bytes, mime_type=self._mime_type(path)
         )
 
-        segments = [
-            TranscriptionSegment(start=s["start"], end=s["end"], text=s["text"])
-            for s in result.get("segments", [])
-        ]
-        duration = segments[-1].end if segments else 0.0
+        response = await self._client.aio.models.generate_content(
+            model=self._model_name,
+            contents=[audio_part, _PROMPT],
+            config=types.GenerateContentConfig(
+                system_instruction=_SYSTEM_INSTRUCTION,
+                response_mime_type="application/json",
+            ),
+        )
+
+        raw = response.text.strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.error("Resposta do Gemini não é JSON válido: %s", raw[:200])
+            raise RuntimeError("Falha ao transcrever áudio: resposta inválida da IA") from exc
 
         return TranscriptionResult(
-            text=result["text"],
-            segments=segments,
-            language=result.get("language", "pt"),
-            duration=duration,
+            text=data.get("text", ""),
+            language=data.get("language", "pt"),
+            duration=float(data.get("duration") or 0.0),
         )
 
 

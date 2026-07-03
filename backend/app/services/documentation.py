@@ -55,7 +55,7 @@ class ProcessDocumentation:
 class DocumentationService:
     def __init__(self) -> None:
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._model_name = "gemini-2.0-flash"
+        self._model_name = settings.GEMINI_MODEL
 
     async def generate(self, bpmn_xml: str) -> ProcessDocumentation:
         if not bpmn_xml or not bpmn_xml.strip():
@@ -64,7 +64,10 @@ class DocumentationService:
         response = await self._client.aio.models.generate_content(
             model=self._model_name,
             contents=_PROMPT.format(bpmn_xml=bpmn_xml[:60_000]),
-            config=types.GenerateContentConfig(system_instruction=_SYSTEM_INSTRUCTION),
+            config=types.GenerateContentConfig(
+                system_instruction=_SYSTEM_INSTRUCTION,
+                response_mime_type="application/json",
+            ),
         )
 
         raw = response.text.strip()
