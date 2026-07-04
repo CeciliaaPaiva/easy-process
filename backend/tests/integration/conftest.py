@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.database import Base, get_db
 from app.main import create_app
 
-TEST_DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./test_integration.db")
+TEST_DB_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///./test_integration.db")
 
 
 @pytest.fixture(scope="session")
