@@ -92,7 +92,28 @@ export const api = {
       ),
     bpmn: (id: string) =>
       request<{ bpmn_xml: string; version: number }>(`/api/v1/processes/${id}/bpmn`),
-    export: (id: string) => `${API_BASE_URL}/api/v1/processes/${id}/export`,
+    export: async (id: string) => {
+      const token =
+        typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+      const response = await fetch(`${API_BASE_URL}/api/v1/processes/${id}/export`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Erro desconhecido' }))
+        throw new ApiError(error.detail ?? `HTTP ${response.status}`, response.status)
+      }
+      const disposition = response.headers.get('Content-Disposition') ?? ''
+      const match = disposition.match(/filename="?([^";]+)"?/)
+      const filename = match?.[1] ?? `processo-${id}.bpmn`
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+    },
     upload: (
       projectId: string,
       name: string,

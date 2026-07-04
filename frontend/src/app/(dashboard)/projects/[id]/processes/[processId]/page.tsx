@@ -207,14 +207,15 @@ export default function ProcessPage() {
                 <History size={14} />
                 Versões
               </Button>
-              <a
-                href={api.processes.export(processId)}
-                download
+              <button
+                onClick={() => api.processes.export(processId).catch((err) => {
+                  setError(err instanceof ApiError ? err.message : 'Erro ao exportar BPMN')
+                })}
                 className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100"
               >
                 <Download size={14} />
                 Exportar
-              </a>
+              </button>
             </>
           )}
         </div>
