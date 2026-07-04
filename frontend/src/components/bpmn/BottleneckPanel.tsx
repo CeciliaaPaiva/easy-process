@@ -25,7 +25,12 @@ const SEVERITY_STYLES: Record<string, string> = {
   baixa: 'bg-gray-100 text-gray-600',
 }
 
-export function BottleneckPanel({ processId }: { processId: string }) {
+interface Props {
+  processId: string
+  onHighlight?: (elementIds: string[]) => void
+}
+
+export function BottleneckPanel({ processId, onHighlight }: Props) {
   const { toast } = useToast()
   const [data, setData] = useState<BottleneckData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -44,7 +49,7 @@ export function BottleneckPanel({ processId }: { processId: string }) {
       setData(result)
       if (regen) toast('Análise atualizada', 'success')
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Erro ao analisar gargalos'
+      const msg = err instanceof ApiError ? err.message : 'Erro ao gerar sugestões'
       setError(msg)
       if (regen) toast(msg, 'error')
     } finally {
@@ -79,7 +84,7 @@ export function BottleneckPanel({ processId }: { processId: string }) {
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 text-sm">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-gray-900">Gargalos</h3>
+        <h3 className="font-semibold text-gray-900">Sugestões</h3>
         <Button
           variant="ghost"
           className="gap-1 text-xs"
@@ -97,11 +102,16 @@ export function BottleneckPanel({ processId }: { processId: string }) {
       </div>
 
       {data.findings.length === 0 ? (
-        <p className="text-gray-500">Nenhum gargalo identificado neste processo.</p>
+        <p className="text-gray-500">Nenhuma sugestão de melhoria identificada neste processo.</p>
       ) : (
         <div className="flex flex-col gap-2">
           {data.findings.map((f, i) => (
-            <div key={i} className="rounded-lg border border-gray-100 p-3">
+            <div
+              key={i}
+              className="rounded-lg border border-gray-100 p-3 transition-colors hover:border-red-200 hover:bg-red-50/40"
+              onMouseEnter={() => onHighlight?.(f.related_elements)}
+              onMouseLeave={() => onHighlight?.([])}
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-gray-900">{f.title}</span>
                 <span

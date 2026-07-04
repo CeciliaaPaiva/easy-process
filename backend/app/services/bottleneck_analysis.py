@@ -10,17 +10,24 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 DISCLAIMER = (
-    "Esta análise é um auxílio automatizado e não substitui a avaliação de um "
-    "analista de negócios."
+    "Estas sugestões são geradas automaticamente a partir do diagrama e servem como "
+    "ponto de partida. Um analista de negócios pode aprofundar cada uma delas e "
+    "desenhar o plano de implementação."
 )
 
 _SYSTEM_INSTRUCTION = (
-    "Você é um analista de processos de negócio especialista em identificar gargalos "
-    "e oportunidades de melhoria em diagramas BPMN. Analise o processo as-is fornecido "
-    "e aponte possíveis pontos de atenção: atividades manuais repetitivas, ausência de "
-    "paralelismo onde seria possível, pontos únicos de falha, handoffs excessivos entre "
-    "atores, gargalos de tempo ou gargalos de aprovação. Responda SOMENTE com JSON "
-    "válido, sem markdown, sem texto antes ou depois."
+    "Você é um consultor sênior de processos de negócio que analisa diagramas BPMN e "
+    "gera sugestões de melhoria para o dono da empresa. Use terminologia técnica de BPM "
+    "(ex.: gateway de decisão, handoff, retrabalho, SLA, throughput, ponto único de "
+    "falha, paralelização) e seja direto — descrições curtas, sem enrolação. Aponte "
+    "oportunidades concretas: atividades manuais repetitivas automatizáveis, ausência "
+    "de paralelismo, pontos únicos de falha, handoffs excessivos entre atores, gargalos "
+    "de tempo ou de aprovação. Cada sugestão deve terminar com uma frase curta de "
+    "chamada para ação, mas VARIE a redação entre os findings — nunca repita a mesma "
+    "frase duas vezes na mesma resposta (ex.: 'Ganho estimado: X'; 'Vale priorizar em "
+    "consultoria dedicada'; 'Requer levantamento mais fino com um analista'; 'Candidato "
+    "natural a um diagnóstico aprofundado'). Responda SOMENTE com JSON válido, sem "
+    "markdown, sem texto antes ou depois."
 )
 
 _PROMPT = """\
@@ -28,15 +35,15 @@ Analise o BPMN XML abaixo e retorne um JSON com a seguinte estrutura:
 {{
   "findings": [
     {{
-      "title": "Nome curto do gargalo/ponto de atenção",
-      "description": "Explicação do problema identificado e por que afeta o processo",
+      "title": "Nome curto e técnico da sugestão de melhoria",
+      "description": "Explicação técnica e sucinta do problema, o impacto no negócio (tempo/custo/risco) e uma chamada para ação curta e variada (não repita a mesma frase entre findings)",
       "severity": "baixa" | "média" | "alta",
       "related_elements": ["id do elemento BPMN relacionado, se aplicável"]
     }}
   ]
 }}
 
-Se não encontrar nenhum gargalo relevante, retorne "findings": [].
+Se não encontrar nenhuma sugestão relevante, retorne "findings": [].
 
 BPMN XML:
 {bpmn_xml}"""

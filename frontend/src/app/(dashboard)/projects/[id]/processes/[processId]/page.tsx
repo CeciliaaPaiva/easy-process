@@ -31,7 +31,7 @@ const BpmnViewer = dynamic(
 const RIGHT_TABS = [
   { key: 'chat', label: 'Chat' },
   { key: 'docs', label: 'Documentação' },
-  { key: 'bottlenecks', label: 'Gargalos' },
+  { key: 'bottlenecks', label: 'Sugestões' },
   { key: 'transcription', label: 'Transcrição' },
 ] as const
 type RightTab = (typeof RIGHT_TABS)[number]['key']
@@ -152,6 +152,7 @@ export default function ProcessPage() {
   const [error, setError] = useState('')
   const [showVersions, setShowVersions] = useState(false)
   const [rightTab, setRightTab] = useState<RightTab>('chat')
+  const [highlightIds, setHighlightIds] = useState<string[]>([])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadProcess = useCallback(async () => {
@@ -298,7 +299,7 @@ export default function ProcessPage() {
             </div>
           )}
           {isReady && bpmnXml && (
-            <BpmnViewer xml={bpmnXml} className="h-full w-full" />
+            <BpmnViewer xml={bpmnXml} className="h-full w-full" highlightIds={highlightIds} />
           )}
         </div>
 
@@ -309,7 +310,10 @@ export default function ProcessPage() {
               {RIGHT_TABS.map(({ key, label }) => (
                 <button
                   key={key}
-                  onClick={() => setRightTab(key)}
+                  onClick={() => {
+                    setRightTab(key)
+                    setHighlightIds([])
+                  }}
                   className={`flex-1 py-2 text-xs font-medium transition-colors ${
                     rightTab === key
                       ? 'border-b-2 border-blue-600 text-blue-600'
@@ -325,7 +329,9 @@ export default function ProcessPage() {
                 <ChatWindow processId={processId} onBpmnUpdate={handleBpmnUpdate} />
               )}
               {rightTab === 'docs' && <DocsPanel processId={processId} />}
-              {rightTab === 'bottlenecks' && <BottleneckPanel processId={processId} />}
+              {rightTab === 'bottlenecks' && (
+                <BottleneckPanel processId={processId} onHighlight={setHighlightIds} />
+              )}
               {rightTab === 'transcription' && (
                 <TranscriptionPanel transcription={proc.transcription} />
               )}

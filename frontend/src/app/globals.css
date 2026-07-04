@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.bpmn-suggestion-highlight .djs-visual > :is(rect, circle, polygon, path) {
+  stroke: #dc2626 !important;
+  stroke-width: 3px !important;
+  fill: #fee2e2 !important;
+}
