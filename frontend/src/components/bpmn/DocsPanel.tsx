@@ -43,7 +43,7 @@ export function DocsPanel({ processId }: { processId: string }) {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-3 p-4">
+      <div className="flex h-full flex-col gap-3 p-4">
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-4/5" />
         <Skeleton className="h-4 w-3/4" />
@@ -54,7 +54,7 @@ export function DocsPanel({ processId }: { processId: string }) {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center gap-3 p-6 text-center">
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <FileText size={32} className="text-gray-300" />
         <p className="text-sm text-gray-500">{error}</p>
         <Button variant="ghost" onClick={() => load()}>Tentar novamente</Button>
@@ -65,7 +65,7 @@ export function DocsPanel({ processId }: { processId: string }) {
   if (!doc) return null
 
   return (
-    <div className="flex flex-col gap-4 overflow-y-auto p-4 text-sm">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 text-sm">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-gray-900">Documentação</h3>
         <Button

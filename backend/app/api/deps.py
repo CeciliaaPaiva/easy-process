@@ -1,5 +1,4 @@
 import uuid
-from collections.abc import AsyncGenerator
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -14,9 +13,8 @@ from app.models.user import User
 bearer_scheme = HTTPBearer()
 
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    async for session in get_db():
-        yield session
+async def get_db_session(db: AsyncSession = Depends(get_db)) -> AsyncSession:
+    return db
 
 
 async def get_current_user(

@@ -17,6 +17,8 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { DocsPanel } from '@/components/bpmn/DocsPanel'
+import { TranscriptionPanel } from '@/components/bpmn/TranscriptionPanel'
+import { BottleneckPanel } from '@/components/bpmn/BottleneckPanel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/ui/dialog'
 
@@ -25,6 +27,14 @@ const BpmnViewer = dynamic(
   () => import('@/components/bpmn/BpmnViewer').then((m) => m.BpmnViewer),
   { ssr: false, loading: () => <Skeleton className="h-full w-full" /> }
 )
+
+const RIGHT_TABS = [
+  { key: 'chat', label: 'Chat' },
+  { key: 'docs', label: 'Documentação' },
+  { key: 'bottlenecks', label: 'Gargalos' },
+  { key: 'transcription', label: 'Transcrição' },
+] as const
+type RightTab = (typeof RIGHT_TABS)[number]['key']
 
 const POLL_INTERVAL_MS = 3000
 const PROCESSING_STATUSES = new Set(['pending', 'transcribing', 'generating'])
@@ -41,6 +51,7 @@ function VersionsPanel({
   const [versions, setVersions] = useState<ProcessVersion[]>([])
   const [loading, setLoading] = useState(true)
   const [restoring, setRestoring] = useState<number | null>(null)
+  const [previewVersion, setPreviewVersion] = useState<ProcessVersion | null>(null)
 
   useEffect(() => {
     api.versions
@@ -63,35 +74,71 @@ function VersionsPanel({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      {loading ? (
-        Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)
-      ) : (
-        versions.map((v) => (
-          <div
-            key={v.id}
-            className="flex items-center justify-between rounded-lg border border-gray-200 p-3"
-          >
-            <div>
-              <p className="text-sm font-medium text-gray-900">Versão {v.version}</p>
-              <p className="text-xs text-gray-500 line-clamp-1">
-                {v.change_description ?? 'Sem descrição'}
-              </p>
+    <>
+      <div className="flex flex-col gap-2">
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)
+        ) : (
+          versions.map((v) => (
+            <div
+              key={v.id}
+              className="flex items-center justify-between rounded-lg border border-gray-200 p-3"
+            >
+              <div>
+                <p className="text-sm font-medium text-gray-900">Versão {v.version}</p>
+                <p className="text-xs text-gray-500 line-clamp-1">
+                  {v.change_description ?? 'Sem descrição'}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  variant="ghost"
+                  className="text-xs"
+                  onClick={() => setPreviewVersion(v)}
+                >
+                  Visualizar
+                </Button>
+                {v.version !== currentVersion && (
+                  <Button
+                    variant="ghost"
+                    className="text-xs"
+                    loading={restoring === v.version}
+                    onClick={() => restore(v)}
+                  >
+                    Restaurar
+                  </Button>
+                )}
+              </div>
             </div>
-            {v.version !== currentVersion && (
+          ))
+        )}
+      </div>
+
+      <Dialog
+        open={previewVersion !== null}
+        onClose={() => setPreviewVersion(null)}
+        title={previewVersion ? `Versão ${previewVersion.version}` : ''}
+        className="max-w-4xl"
+      >
+        {previewVersion && (
+          <div className="flex flex-col gap-3">
+            <div className="h-[60vh] w-full rounded-lg border border-gray-200 bg-gray-50">
+              <BpmnViewer xml={previewVersion.bpmn_xml} className="h-full w-full" />
+            </div>
+            {previewVersion.version !== currentVersion && (
               <Button
                 variant="ghost"
-                className="text-xs"
-                loading={restoring === v.version}
-                onClick={() => restore(v)}
+                className="self-end text-xs"
+                loading={restoring === previewVersion.version}
+                onClick={() => restore(previewVersion)}
               >
-                Restaurar
+                Restaurar esta versão
               </Button>
             )}
           </div>
-        ))
-      )}
-    </div>
+        )}
+      </Dialog>
+    </>
   )
 }
 
@@ -104,7 +151,7 @@ export default function ProcessPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showVersions, setShowVersions] = useState(false)
-  const [rightTab, setRightTab] = useState<'chat' | 'docs'>('chat')
+  const [rightTab, setRightTab] = useState<RightTab>('chat')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadProcess = useCallback(async () => {
@@ -259,25 +306,28 @@ export default function ProcessPage() {
         {isReady && (
           <div className="flex w-80 shrink-0 flex-col border-l border-gray-200 bg-white">
             <div className="flex border-b border-gray-200">
-              {(['chat', 'docs'] as const).map((tab) => (
+              {RIGHT_TABS.map(({ key, label }) => (
                 <button
-                  key={tab}
-                  onClick={() => setRightTab(tab)}
+                  key={key}
+                  onClick={() => setRightTab(key)}
                   className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                    rightTab === tab
+                    rightTab === key
                       ? 'border-b-2 border-blue-600 text-blue-600'
                       : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {tab === 'chat' ? 'Chat' : 'Documentação'}
+                  {label}
                 </button>
               ))}
             </div>
-            <div className="flex-1 overflow-hidden">
-              {rightTab === 'chat' ? (
+            <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+              {rightTab === 'chat' && (
                 <ChatWindow processId={processId} onBpmnUpdate={handleBpmnUpdate} />
-              ) : (
-                <DocsPanel processId={processId} />
+              )}
+              {rightTab === 'docs' && <DocsPanel processId={processId} />}
+              {rightTab === 'bottlenecks' && <BottleneckPanel processId={processId} />}
+              {rightTab === 'transcription' && (
+                <TranscriptionPanel transcription={proc.transcription} />
               )}
             </div>
           </div>

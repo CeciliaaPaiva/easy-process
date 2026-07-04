@@ -2,7 +2,7 @@ import uuid
 
 
 async def _register(client, suffix: str = "") -> dict:
-    uid = suffix or uuid.uuid4().hex[:8]
+    uid = f"{suffix}{uuid.uuid4().hex[:8]}" if suffix else uuid.uuid4().hex[:8]
     resp = await client.post(
         "/api/v1/auth/register",
         json={

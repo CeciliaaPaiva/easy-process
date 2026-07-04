@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.database import Base, get_db
 from app.main import create_app
 
-TEST_DB_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///./test_integration.db")
+TEST_DB_URL = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./test_integration.db")
 
 
 @pytest.fixture(scope="session")
@@ -17,8 +17,10 @@ async def engine():
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield _engine
-    async with _engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    # Nunca dropar tabelas aqui: quando TEST_DATABASE_URL não é definida, este
+    # engine aponta para o mesmo banco de DATABASE_URL (necessário para que o
+    # worker de background, que usa AsyncSessionLocal real, enxergue os dados
+    # criados pelos testes). Um drop_all aqui já apagou o banco de dev antes.
     await _engine.dispose()
 
 

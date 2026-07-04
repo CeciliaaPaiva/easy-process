@@ -1,8 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { FolderOpen, LogOut, Settings } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FolderOpen, LogOut, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { clearTokens } from '@/lib/auth'
 
@@ -11,9 +12,22 @@ const navItems = [
   { href: '/settings', label: 'Configurações', icon: Settings },
 ]
 
+const STORAGE_KEY = 'easy-process:sidebar-collapsed'
+
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window === 'undefined' ? false : localStorage.getItem(STORAGE_KEY) === 'true'
+  )
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev
+      localStorage.setItem(STORAGE_KEY, String(next))
+      return next
+    })
+  }
 
   function handleLogout() {
     clearTokens()
@@ -21,10 +35,25 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-60 flex-col border-r border-gray-200 bg-white">
+    <aside
+      suppressHydrationWarning
+      className={cn(
+        'flex h-screen flex-col border-r border-gray-200 bg-white transition-all',
+        collapsed ? 'w-16' : 'w-60'
+      )}
+    >
       {/* Logo */}
-      <div className="flex h-16 items-center border-b border-gray-200 px-6">
-        <span className="text-lg font-bold text-blue-600">Easy Process</span>
+      <div className="flex h-16 items-center justify-between border-b border-gray-200 px-3">
+        {!collapsed && (
+          <span className="truncate px-3 text-lg font-bold text-blue-600">Easy Process</span>
+        )}
+        <button
+          onClick={toggleCollapsed}
+          title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+          className="ml-auto rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+        >
+          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
       </div>
 
       {/* Nav */}
@@ -33,6 +62,7 @@ export function Sidebar() {
           <Link
             key={href}
             href={href}
+            title={collapsed ? label : undefined}
             className={cn(
               'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
               pathname.startsWith(href)
@@ -41,7 +71,7 @@ export function Sidebar() {
             )}
           >
             <Icon className="h-4 w-4 flex-shrink-0" />
-            {label}
+            {!collapsed && <span>{label}</span>}
           </Link>
         ))}
       </nav>
@@ -50,10 +80,11 @@ export function Sidebar() {
       <div className="border-t border-gray-200 p-3">
         <button
           onClick={handleLogout}
+          title={collapsed ? 'Sair' : undefined}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
         >
           <LogOut className="h-4 w-4" />
-          Sair
+          {!collapsed && <span>Sair</span>}
         </button>
       </div>
     </aside>

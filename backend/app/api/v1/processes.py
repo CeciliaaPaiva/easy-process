@@ -21,6 +21,8 @@ from app.models.project import Project
 from app.models.user import User
 from app.models.process import ChatMessage
 from app.schemas.process import (
+    BottleneckAnalysisResponse,
+    BottleneckFindingResponse,
     BpmnUpdateRequest,
     ChatMessageResponse,
     ChatRequest,
@@ -474,3 +476,49 @@ async def regenerate_process_docs(
     db: AsyncSession = Depends(get_db),
 ) -> DocumentationResponse:
     return await get_process_docs(process_id, current_user, db)
+
+
+@router.get(
+    "/processes/{process_id}/bottlenecks", response_model=BottleneckAnalysisResponse
+)
+async def get_process_bottlenecks(
+    process_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BottleneckAnalysisResponse:
+    from app.services.bottleneck_analysis import bottleneck_analysis_service
+
+    process = await _get_process_or_404(db, process_id, current_user.tenant_id)
+
+    if process.status != "ready" or not process.bpmn_xml:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Processo não está pronto. Status: {process.status}",
+        )
+
+    analysis = await bottleneck_analysis_service.analyze(process.bpmn_xml)
+
+    return BottleneckAnalysisResponse(
+        process_id=process_id,
+        findings=[
+            BottleneckFindingResponse(
+                title=f.title,
+                description=f.description,
+                severity=f.severity,
+                related_elements=f.related_elements,
+            )
+            for f in analysis.findings
+        ],
+        disclaimer=analysis.disclaimer,
+    )
+
+
+@router.post(
+    "/processes/{process_id}/bottlenecks", response_model=BottleneckAnalysisResponse
+)
+async def regenerate_process_bottlenecks(
+    process_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BottleneckAnalysisResponse:
+    return await get_process_bottlenecks(process_id, current_user, db)

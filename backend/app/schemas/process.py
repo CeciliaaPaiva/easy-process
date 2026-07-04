@@ -75,3 +75,16 @@ class DocumentationResponse(BaseModel):
     business_rules: list[str]
     decision_points: list[dict]
     exceptions: list[str]
+
+
+class BottleneckFindingResponse(BaseModel):
+    title: str
+    description: str
+    severity: str
+    related_elements: list[str]
+
+
+class BottleneckAnalysisResponse(BaseModel):
+    process_id: uuid.UUID
+    findings: list[BottleneckFindingResponse]
+    disclaimer: str
