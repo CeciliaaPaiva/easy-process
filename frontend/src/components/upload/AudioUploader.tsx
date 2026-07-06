@@ -8,9 +8,12 @@ import type { Process } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
+import { AudioRecorder } from '@/components/upload/AudioRecorder'
 
 const ACCEPTED = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/ogg', 'audio/x-m4a']
 const MAX_SIZE_MB = 100
+
+type Mode = 'upload' | 'record'
 
 interface Props {
   projectId: string
@@ -19,6 +22,7 @@ interface Props {
 
 export function AudioUploader({ projectId, onUploaded }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [mode, setMode] = useState<Mode>('upload')
   const [file, setFile] = useState<File | null>(null)
   const [name, setName] = useState('')
   const [progress, setProgress] = useState(0)
@@ -42,6 +46,12 @@ export function AudioUploader({ projectId, onUploaded }: Props) {
     setError('')
     setFile(f)
     if (!name) setName(f.name.replace(/\.[^.]+$/, ''))
+  }
+
+  const handleRecorded = (f: File) => {
+    setError('')
+    setFile(f)
+    if (!name) setName('Gravação de áudio')
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -72,28 +82,8 @@ export function AudioUploader({ projectId, onUploaded }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <div
-        className={clsx(
-          'rounded-xl border-2 border-dashed p-8 text-center transition-colors',
-          dragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400',
-          file && 'border-green-300 bg-green-50'
-        )}
-        onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-        onClick={() => !file && inputRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && !file && inputRef.current?.click()}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".mp3,.wav,.m4a,.ogg,audio/*"
-          className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(f) }}
-        />
-        {file ? (
+      {file ? (
+        <div className="rounded-xl border-2 border-dashed border-green-300 bg-green-50 p-8 text-center">
           <div className="flex items-center justify-center gap-3">
             <FileAudio size={24} className="text-green-600" />
             <div className="text-left">
@@ -108,16 +98,66 @@ export function AudioUploader({ projectId, onUploaded }: Props) {
               <X size={14} />
             </button>
           </div>
-        ) : (
-          <div className="flex flex-col items-center gap-2">
-            <Upload size={32} className="text-gray-300" />
-            <p className="text-sm text-gray-500">
-              Arraste um áudio ou <span className="text-blue-600 underline">clique para selecionar</span>
-            </p>
-            <p className="text-xs text-gray-400">MP3, WAV, M4A, OGG • máx {MAX_SIZE_MB}MB</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex gap-1 rounded-lg bg-gray-100 p-1 text-sm font-medium">
+            <button
+              type="button"
+              onClick={() => setMode('upload')}
+              className={clsx(
+                'flex-1 rounded-md py-1.5 transition-colors',
+                mode === 'upload' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+              )}
+            >
+              Enviar arquivo
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('record')}
+              className={clsx(
+                'flex-1 rounded-md py-1.5 transition-colors',
+                mode === 'record' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+              )}
+            >
+              Gravar áudio
+            </button>
           </div>
-        )}
-      </div>
+
+          {mode === 'upload' ? (
+            <div
+              className={clsx(
+                'rounded-xl border-2 border-dashed p-8 text-center transition-colors',
+                dragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+              )}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => inputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && inputRef.current?.click()}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".mp3,.wav,.m4a,.ogg,audio/*"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(f) }}
+              />
+              <div className="flex flex-col items-center gap-2">
+                <Upload size={32} className="text-gray-300" />
+                <p className="text-sm text-gray-500">
+                  Arraste um áudio ou <span className="text-blue-600 underline">clique para selecionar</span>
+                </p>
+                <p className="text-xs text-gray-400">MP3, WAV, M4A, OGG • máx {MAX_SIZE_MB}MB</p>
+              </div>
+            </div>
+          ) : (
+            <AudioRecorder onRecorded={handleRecorded} />
+          )}
+        </>
+      )}
 
       {file && (
         <Input

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "/data/uploads"
     MAX_UPLOAD_SIZE_MB: int = 100
+    MAX_AUDIO_DURATION_MINUTES: int = 30
 
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
