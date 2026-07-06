@@ -1,5 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://backend:8000/api/:path*',
+      },
+    ]
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // bpmn-js uses some Node.js built-ins that need to be shimmed in browser
