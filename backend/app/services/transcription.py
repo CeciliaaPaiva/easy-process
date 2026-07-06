@@ -30,6 +30,7 @@ _MIME_TYPES = {
     ".wav": "audio/wav",
     ".m4a": "audio/mp4",
     ".ogg": "audio/ogg",
+    ".webm": "audio/webm",
 }
 
 

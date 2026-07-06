@@ -433,6 +433,7 @@ Descrição breve do que foi entregue nesta sprint.
 | Multi-tenancy | Shared schema + `tenant_id` | Simples para MVP; toda query filtrada via middleware |
 | Backend | FastAPI | Async nativo; tipagem forte com Pydantic; integração natural com IA |
 | Task queue | BackgroundTasks do FastAPI | Suficiente para MVP; Celery entra quando houver fila e múltiplos workers |
+| Banco de testes de integração | Compartilhado com o banco de dev (sem `TEST_DATABASE_URL` isolada) | Os testes de e2e do pipeline disparam `BackgroundTasks` real, que usa `AsyncSessionLocal` de produção — um banco de teste separado não seria visto pelo worker. Trade-off aceito: acumula tenants/usuários de teste no banco de dev (isolados por `tenant_id`, sem risco funcional). Revisar infra de teste/prod se o produto validar mercado (ver `docs/releases/RELEASE-S8.md`) |
 
 ---
 

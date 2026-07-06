@@ -13,6 +13,7 @@ Esta sprint entregou a primeira das duas features planejadas originalmente para 
 - [S8-03] `backend/app/services/storage.py`: nova função `_probe_duration_seconds()` usa `ffprobe` (via subprocess) para ler a duração real do áudio a partir dos bytes recebidos, suportando qualquer container aceito (mp3/wav/m4a/ogg/webm)
 - [S8-03] `save_audio()` agora rejeita (400) áudios acima de `MAX_AUDIO_DURATION_MINUTES` (novo setting em `core/config.py`, default 30min) — vale tanto para upload de arquivo quanto para gravação
 - [S8-03] `backend/Dockerfile`: adicionado pacote de sistema `ffmpeg` (fornece o binário `ffprobe`)
+- [S8-05] Hotfix pós-release: `transcription.py::_MIME_TYPES` não tinha entrada para `.webm` — caía no fallback de `mimetypes.guess_type()`, que classifica `.webm` como `video/webm`. O Gemini recebia o arquivo rotulado como vídeo e rejeitava com "vídeo corrompido, 0 frames encontrados", derrubando toda gravação feita pela nova feature. Corrigido mapeando `.webm` → `audio/webm` explicitamente; adicionados testes parametrizados para todos os formatos aceitos
 
 ### Frontend
 - [S8-01] `frontend/src/components/upload/AudioRecorder.tsx` (novo): grava áudio via `getUserMedia` + `MediaRecorder` nativos (`audio/webm;codecs=opus`), com cronômetro, auto-stop no limite de duração, preview (`<audio controls>`) antes de confirmar, e aviso quando o navegador não suporta a API
@@ -29,7 +30,7 @@ Esta sprint entregou a primeira das duas features planejadas originalmente para 
 - Pontos planejados: 11 (S8-01 a S8-04)
 - Pontos entregues: 11
 - Cobertura de testes (backend): 80% geral — `storage.py` 95%
-- Testes passando: 136/137 backend (1 skip, mesmo skip de sempre) + 5/5 frontend (testes novos, primeira suíte do frontend)
+- Testes passando: 142/143 backend (1 skip, mesmo skip de sempre) + 5/5 frontend (testes novos, primeira suíte do frontend)
 - `tsc --noEmit`: limpo
 - `npm run lint`: limpo (0 erros/warnings — corrigido nesta sprint, ver acima)
 - `ruff`/`black` (backend): 39 erros / 14 arquivos pré-existentes, **nenhum** nos arquivos tocados nesta sprint (`storage.py`, `config.py`, `test_storage.py` — 100% limpos)
@@ -51,9 +52,11 @@ Esta sprint entregou a primeira das duas features planejadas originalmente para 
 3. Abrir um projeto → "Novo processo" → alternar para "Gravar áudio" → gravar alguns segundos, parar, ouvir o preview, clicar "Usar esta gravação" → dar nome → "Iniciar processamento"
 4. Confirmar que o processo segue o pipeline normal (pending → transcribing → generating → ready)
 5. Testar o limite: ajustar `MAX_AUDIO_DURATION_MINUTES=1` no `.env`, reiniciar o backend, tentar enviar um áudio de mais de 1 minuto (upload ou gravação) e confirmar a rejeição com mensagem clara; reverter o `.env` depois
-6. `docker compose exec backend pytest -q` → 136 passed, 1 skipped
+6. `docker compose exec backend pytest -q` → 142 passed, 1 skipped
 7. `docker compose exec frontend npx vitest run` → 4 passed
 8. `docker compose exec frontend npm run lint` → sem erros
 
 ## Bugs conhecidos
-- Nenhum bug conhecido introduzido nesta release. Débito técnico pré-existente e não resolvido nesta sprint: 39 erros de `ruff` / 14 arquivos fora do padrão `black` em arquivos não relacionados a esta feature (ver "O que ficou para a próxima sprint")
+- **Corrigido pós-release** (mesmo dia): gravações `.webm` falhavam na transcrição por MIME type incorreto (`video/webm` em vez de `audio/webm`) — ver S8-05 acima. Encontrado em teste manual real, corrigido e validado reprocessando o mesmo processo que tinha falhado.
+- Débito técnico pré-existente e não resolvido nesta sprint: 39 erros de `ruff` / 14 arquivos fora do padrão `black` em arquivos não relacionados a esta feature (ver "O que ficou para a próxima sprint")
+- **Decisão consciente, não é bug**: a suíte de testes de integração roda contra o mesmo banco de desenvolvimento (não há `TEST_DATABASE_URL` isolada configurada) — cada execução acumula tenants/usuários de teste (`user_*`, `iso_*`, `member_*`, `dup_*`) que nunca são limpos. Isso é necessário hoje porque os testes de e2e do pipeline dependem do `BackgroundTasks` real do FastAPI enxergar os dados via `AsyncSessionLocal` de produção. Não compromete o funcionamento (isolamento por `tenant_id` continua valendo, e o `drop_all` que apagava o banco já foi removido — ver commit `95624d3`), só acumula dados de teste ao longo do tempo. Decisão da PO: manter assim por ora e revisar a infra de teste/prod se o produto validar mercado.
