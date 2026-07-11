@@ -8,7 +8,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services.llm_usage import log_usage
+from app.services.llm_usage import record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,10 @@ class TranscriptionService:
         return guessed or "audio/mpeg"
 
     async def transcribe(
-        self, audio_path: str, process_id: str | None = None
+        self,
+        audio_path: str,
+        process_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> TranscriptionResult:
         path = Path(audio_path)
         if not path.exists():
@@ -76,7 +79,9 @@ class TranscriptionService:
                 temperature=0.0,
             ),
         )
-        log_usage("transcription", process_id, response, self._model_name)
+        await record_usage(
+            "transcription", tenant_id, process_id, response, self._model_name
+        )
 
         parsed = response.parsed
         if parsed is None:

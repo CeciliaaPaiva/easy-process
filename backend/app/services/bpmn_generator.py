@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.services.bpmn_layout import LayoutError, apply_layout
 from app.services.bpmn_validator import validate_bpmn_xml
-from app.services.llm_usage import log_usage
+from app.services.llm_usage import record_usage
 
 _SYSTEM_INSTRUCTION = """\
 Você é um especialista em modelagem de processos BPMN 2.0.
@@ -70,6 +70,7 @@ class BpmnGeneratorService:
         transcription: str,
         max_retries: int = 3,
         process_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> BpmnGenerationResult:
         if not transcription or len(transcription.strip()) < 50:
             raise ValueError("Transcrição muito curta ou vazia (mínimo 50 caracteres)")
@@ -91,8 +92,13 @@ class BpmnGeneratorService:
                 contents=prompt,
                 config=config,
             )
-            log_usage(
-                "bpmn_generation", process_id, response, self._model_name, attempt
+            await record_usage(
+                "bpmn_generation",
+                tenant_id,
+                process_id,
+                response,
+                self._model_name,
+                attempt,
             )
 
             data = response.parsed

@@ -407,6 +407,7 @@ async def send_chat_message(
         instruction=data.message,
         history=history,
         process_id=str(process_id),
+        tenant_id=str(process.tenant_id),
     )
 
     process.version += 1

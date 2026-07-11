@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.services.bpmn_validator import validate_bpmn_xml
-from app.services.llm_usage import log_usage
+from app.services.llm_usage import record_usage
 
 _REFINER_SYSTEM = """\
 Você é um especialista em modelagem de processos BPMN 2.0.
@@ -82,6 +82,7 @@ class BpmnRefinerService:
         history: list[dict[str, str]],
         max_retries: int = 3,
         process_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> BpmnRefinementResult:
         if not bpmn_xml or not instruction.strip():
             raise ValueError("BPMN e instrução são obrigatórios")
@@ -117,8 +118,13 @@ class BpmnRefinerService:
                 contents=contents,
                 config=config,
             )
-            log_usage(
-                "bpmn_refinement", process_id, response, self._model_name, attempt
+            await record_usage(
+                "bpmn_refinement",
+                tenant_id,
+                process_id,
+                response,
+                self._model_name,
+                attempt,
             )
 
             data = response.parsed

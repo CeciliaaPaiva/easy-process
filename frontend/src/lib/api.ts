@@ -5,6 +5,7 @@ import type {
   Process,
   ProcessVersion,
   Project,
+  UsageSummary,
   User,
 } from '@/types'
 
@@ -209,5 +210,10 @@ export const api = {
       }),
     removeMember: (id: string) =>
       request<void>(`/api/v1/tenants/members/${id}`, { method: 'DELETE' }),
+  },
+
+  admin: {
+    usage: (days = 30) =>
+      request<UsageSummary>(`/api/v1/admin/usage?days=${days}`),
   },
 }

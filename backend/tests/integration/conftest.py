@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.database import Base, get_db
 from app.main import create_app
 
-TEST_DB_URL = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./test_integration.db")
+TEST_DB_URL = os.getenv("TEST_DATABASE_URL") or os.getenv(
+    "DATABASE_URL", "sqlite+aiosqlite:///./test_integration.db"
+)
 
 
 @pytest.fixture(scope="session")
@@ -22,6 +24,15 @@ async def engine():
     # worker de background, que usa AsyncSessionLocal real, enxergue os dados
     # criados pelos testes). Um drop_all aqui já apagou o banco de dev antes.
     await _engine.dispose()
+
+
+@pytest.fixture
+async def db_session(engine):
+    """Sessão de banco direta para testes que precisam seedar dados sem
+    endpoint próprio (ex: LlmUsageLog, que só é escrito pelo pipeline de IA)."""
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        yield session
 
 
 @pytest.fixture

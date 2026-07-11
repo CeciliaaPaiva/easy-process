@@ -1,15 +1,27 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { ChevronLeft, ChevronRight, FolderOpen, LogOut, Settings } from 'lucide-react'
+import {
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  LogOut,
+  Settings,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { clearTokens } from '@/lib/auth'
+import { api } from '@/lib/api'
 
 const navItems = [
   { href: '/projects', label: 'Projetos', icon: FolderOpen },
   { href: '/settings', label: 'Configurações', icon: Settings },
+]
+
+const adminNavItems = [
+  { href: '/admin/usage', label: 'Uso de IA', icon: BarChart3 },
 ]
 
 const STORAGE_KEY = 'easy-process:sidebar-collapsed'
@@ -20,6 +32,14 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(() =>
     typeof window === 'undefined' ? false : localStorage.getItem(STORAGE_KEY) === 'true'
   )
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    api.auth
+      .me()
+      .then((user) => setIsAdmin(user.role === 'admin'))
+      .catch(() => setIsAdmin(false))
+  }, [])
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -58,7 +78,7 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {navItems.map(({ href, label, icon: Icon }) => (
+        {[...navItems, ...(isAdmin ? adminNavItems : [])].map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}

@@ -24,7 +24,9 @@ async def process_audio_pipeline(process_id: uuid.UUID) -> None:
             logger.info("Iniciando transcrição do processo %s", process_id)
 
             transcription = await transcription_service.transcribe(
-                process.audio_path, process_id=str(process_id)
+                process.audio_path,
+                process_id=str(process_id),
+                tenant_id=str(process.tenant_id),
             )
             process.transcription = transcription.text
             await db.commit()
@@ -33,7 +35,9 @@ async def process_audio_pipeline(process_id: uuid.UUID) -> None:
             logger.info("Gerando BPMN para o processo %s", process_id)
 
             result = await bpmn_generator_service.generate(
-                transcription.text, process_id=str(process_id)
+                transcription.text,
+                process_id=str(process_id),
+                tenant_id=str(process.tenant_id),
             )
 
             process.bpmn_xml = result.bpmn_xml

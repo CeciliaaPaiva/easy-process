@@ -88,3 +88,46 @@ export interface AuthResponse {
   token_type: string
   user: User
 }
+
+export interface UsageByStage {
+  stage: string
+  calls: number
+  prompt_tokens: number
+  output_tokens: number
+  cached_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
+}
+
+export interface UsageByDay {
+  day: string
+  calls: number
+  total_tokens: number
+  estimated_cost_usd: number
+}
+
+export interface UsageLogEntry {
+  id: string
+  process_id: string | null
+  stage: string
+  model: string
+  attempt: number
+  prompt_tokens: number
+  output_tokens: number
+  cached_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
+  created_at: string
+}
+
+export interface UsageSummary {
+  total_calls: number
+  total_prompt_tokens: number
+  total_output_tokens: number
+  total_cached_tokens: number
+  total_tokens: number
+  total_estimated_cost_usd: number
+  by_stage: UsageByStage[]
+  by_day: UsageByDay[]
+  recent_logs: UsageLogEntry[]
+}

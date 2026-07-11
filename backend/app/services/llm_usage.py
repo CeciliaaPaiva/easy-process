@@ -7,6 +7,7 @@ Ajustar conforme a tabela oficial do Gemini API mudar.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 
 logger = logging.getLogger("llm_usage")
@@ -81,4 +82,53 @@ def log_usage(
         usage.total_tokens,
         usage.estimated_cost_usd,
     )
+    return usage
+
+
+async def record_usage(
+    stage: str,
+    tenant_id: str | uuid.UUID | None,
+    process_id: str | uuid.UUID | None,
+    response: object,
+    model_name: str,
+    attempt: int = 1,
+) -> LlmUsage:
+    """Loga (via log_usage) e persiste o uso em app.models.LlmUsageLog para o
+    painel administrativo. Abre sua própria sessão de banco — os serviços de
+    IA são singletons sem sessão de requisição, então persistir aqui evita
+    threadear uma AsyncSession por todos eles. Falha ao persistir nunca
+    interrompe o pipeline: é instrumentação, não caminho crítico. Sem
+    tenant_id (ex: chamadas diretas em testes) só loga, não persiste."""
+    usage = log_usage(
+        stage, str(process_id) if process_id else None, response, model_name, attempt
+    )
+
+    if tenant_id is None:
+        return usage
+
+    try:
+        # Import tardio evita import circular (app.core.database -> ... -> llm_usage
+        # não existe hoje, mas mantém este módulo importável sem app.models carregado).
+        from app.core.database import AsyncSessionLocal
+        from app.models.llm_usage_log import LlmUsageLog
+
+        async with AsyncSessionLocal() as db:
+            db.add(
+                LlmUsageLog(
+                    tenant_id=uuid.UUID(str(tenant_id)),
+                    process_id=uuid.UUID(str(process_id)) if process_id else None,
+                    stage=stage,
+                    model=model_name,
+                    attempt=attempt,
+                    prompt_tokens=usage.prompt_tokens,
+                    output_tokens=usage.output_tokens,
+                    cached_tokens=usage.cached_tokens,
+                    total_tokens=usage.total_tokens,
+                    estimated_cost_usd=usage.estimated_cost_usd,
+                )
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("Falha ao persistir llm_usage_log (stage=%s)", stage)
+
     return usage
