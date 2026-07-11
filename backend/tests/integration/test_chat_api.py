@@ -109,6 +109,27 @@ class TestSendChatMessage:
         assert data["user_message"]["role"] == "user"
         assert data["assistant_message"]["role"] == "assistant"
 
+    async def test_refiner_failure_returns_422_not_500(self, client, mocker):
+        """Quando o refinador esgota as tentativas (RuntimeError), a API deve
+        responder 422 com uma mensagem clara — não vazar um 500 genérico."""
+        auth, process_id = await _ready_process(client, mocker)
+
+        mocker.patch(
+            "app.services.bpmn_refiner.bpmn_refiner_service.refine",
+            side_effect=RuntimeError(
+                "Não foi possível refinar BPMN após 3 tentativas. "
+                "Último erro: formas sobrepostas"
+            ),
+        )
+
+        resp = await client.post(
+            f"/api/v1/processes/{process_id}/chat",
+            json={"message": "Adicione a representação dos atores"},
+            headers=auth["headers"],
+        )
+        assert resp.status_code == 422
+        assert "não foi possível aplicar" in resp.json()["detail"].lower()
+
     async def test_history_persisted_after_send(self, client, mocker):
         auth, process_id = await _ready_process(client, mocker)
 

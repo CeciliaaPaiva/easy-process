@@ -45,16 +45,28 @@ def validate_bpmn_xml(xml: str) -> tuple[bool, str]:
 
 
 def _find_shape_overlap(root: etree._Element) -> str:
+    # Pools (bpmn:participant) e raias (bpmn:lane) são containers: por
+    # definição da notação BPMN, a forma do pool SEMPRE visualmente contém
+    # (logo, "sobrepõe" no sentido geométrico) as formas dos elementos do
+    # processo dentro dele. Isso não é uma sobreposição inválida — é o
+    # comportamento esperado. IDs desses elementos ficam de fora da checagem
+    # de colisão par a par.
+    container_ids = {
+        e.get("id")
+        for e in root.iter()
+        if e.tag.split("}")[-1] in ("participant", "lane") and e.get("id")
+    }
+
     boxes: list[tuple[str, float, float, float, float]] = []
     for shape in root.iter():
         if not shape.tag.split("}")[-1] == "BPMNShape":
             continue
-        bounds = next(
-            (c for c in shape if c.tag.split("}")[-1] == "Bounds"), None
-        )
+        element_id = shape.get("bpmnElement", shape.get("id", "?"))
+        if element_id in container_ids:
+            continue
+        bounds = next((c for c in shape if c.tag.split("}")[-1] == "Bounds"), None)
         if bounds is None:
             continue
-        element_id = shape.get("bpmnElement", shape.get("id", "?"))
         x, y = float(bounds.get("x", 0)), float(bounds.get("y", 0))
         w, h = float(bounds.get("width", 0)), float(bounds.get("height", 0))
         boxes.append((element_id, x, y, x + w, y + h))

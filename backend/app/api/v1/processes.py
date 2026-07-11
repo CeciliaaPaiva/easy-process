@@ -402,13 +402,22 @@ async def send_chat_message(
     db.add(user_msg)
     await db.flush()
 
-    result = await bpmn_refiner_service.refine(
-        bpmn_xml=process.bpmn_xml,
-        instruction=data.message,
-        history=history,
-        process_id=str(process_id),
-        tenant_id=str(process.tenant_id),
-    )
+    try:
+        result = await bpmn_refiner_service.refine(
+            bpmn_xml=process.bpmn_xml,
+            instruction=data.message,
+            history=history,
+            process_id=str(process_id),
+            tenant_id=str(process.tenant_id),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Não foi possível aplicar esta instrução ao diagrama. "
+                "Tente reformular o pedido ou dividir em passos menores."
+            ),
+        ) from exc
 
     process.version += 1
     process.bpmn_xml = result.bpmn_xml
