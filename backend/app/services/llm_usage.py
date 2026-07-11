@@ -13,10 +13,14 @@ from dataclasses import dataclass
 logger = logging.getLogger("llm_usage")
 
 # USD por 1M tokens: (input, output). Cache hit é cobrado a uma fração do input.
+# gemini-2.5-flash foi descontinuado para novas chaves (404 NOT_FOUND) — preço
+# mantido na tabela só de referência histórica.
 _PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     "gemini-flash-lite-latest": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-3.1-flash-lite": (0.25, 1.50),
+    "gemini-flash-latest": (1.50, 9.00),
 }
 _CACHE_HIT_DISCOUNT = 0.25  # tokens servidos do cache custam ~25% do preço de input
 
