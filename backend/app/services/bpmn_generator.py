@@ -8,10 +8,11 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.services.bpmn_layout import LayoutError, apply_layout
+from app.services.bpmn_prompts import SEMANTIC_MODELING_RULES
 from app.services.bpmn_validator import validate_bpmn_xml
 from app.services.llm_usage import record_usage
 
-_SYSTEM_INSTRUCTION = """\
+_SYSTEM_INSTRUCTION = f"""\
 Você é um especialista em modelagem de processos BPMN 2.0.
 
 Analise a transcrição de uma entrevista fornecida pelo usuário e gere:
@@ -20,12 +21,16 @@ Analise a transcrição de uma entrevista fornecida pelo usuário e gere:
 3. Lista de atores/participantes identificados
 4. Lista de tarefas com responsável
 
-IMPORTANTE sobre o XML: gere APENAS os elementos semânticos do processo dentro
-de bpmn:definitions/bpmn:process — startEvent, endEvent, tasks, gateways e
-sequenceFlows, cada um com um id único. NÃO inclua bpmndi:BPMNDiagram nem
-qualquer elemento de diagrama/layout (BPMNShape, BPMNEdge, Bounds, waypoint) —
-o layout visual é calculado automaticamente depois, fora do seu XML. NÃO
-adicione atributos de cor/estilo nem namespaces além de bpmn.
+{SEMANTIC_MODELING_RULES}
+
+IMPORTANTE sobre o XML: gere APENAS os elementos semânticos do processo —
+startEvent, endEvent, tasks (do tipo correto), gateways (do tipo correto),
+sequenceFlows, e opcionalmente bpmn:participant/bpmn:laneSet/bpmn:lane e
+bpmn:textAnnotation/bpmn:association conforme as regras acima — cada elemento
+com um id único. NÃO inclua bpmndi:BPMNDiagram nem qualquer elemento de
+diagrama/layout (BPMNShape, BPMNEdge, Bounds, waypoint) — o layout visual é
+calculado automaticamente depois, fora do seu XML. NÃO adicione atributos de
+cor/estilo nem namespaces além de bpmn.
 
 Responda respeitando estritamente o schema JSON fornecido."""
 

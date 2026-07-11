@@ -1,8 +1,8 @@
-# Release Sprint 9 — Otimização de custo/precisão do pipeline de IA + painel de administração de uso
+# Release Sprint 9 — Otimização de custo/precisão do pipeline de IA, painel de admin de uso e modelagem semântica de BPMN
 
 **Data:** 2026-07-11
 **Sprint:** S9 (ad-hoc, fora do backlog planejado — sem `SPRINT-9-plano.md` correspondente; a Sprint 9 planejada em `docs/sprints/SPRINT-9-plano.md`, animação de fluxo/gargalos no BPMN, não foi tocada por decisão do usuário e será a próxima release numerada, S10)
-**Status:** Concluído (Fases 0–3 do plano de otimização + painel de admin de uso; Fase 4 do plano de otimização fica para depois de haver dados reais de produção)
+**Status:** Concluído (Fases 0–3 do plano de otimização + painel de admin de uso + troca de modelo e regras semânticas de BPMN; Fase 4 do plano de otimização e validação com saída real do novo modelo ficam para depois de mais uso em produção)
 
 ## Resumo
 Dois pedidos diretos encadeados nesta sprint: (1) reduzir o custo por rodada do workflow de IA (áudio → transcrição → BPMN → refinamento) e melhorar a precisão da modelagem, mantendo o provedor de IA atual; (2) construir um painel de administração para a própria dona da plataforma acompanhar gastos de tokens e outros dados operacionais. A exploração inicial do item 1 revelou que o pipeline real usa **Google Gemini** (`google-genai`, modelo `gemini-flash-lite-latest`) em vez de Whisper/Claude como o `CLAUDE.md` descreve — decisão consciente de manter Gemini e não migrar. O item 2 nasceu da instrumentação de custo já criada no item 1 (que antes só logava em stdout) — decidimos persistir esse uso em banco e expor via um painel simples restrito a admins.
@@ -29,6 +29,22 @@ Dois pedidos diretos encadeados nesta sprint: (1) reduzir o custo por rodada do 
 - **Segunda correção, independente**: mesmo com o bug do validador corrigido, uma falha de negócio legítima (ex: o Gemini realmente não conseguir produzir um BPMN válido após 3 tentativas, por qualquer motivo) ainda vazava como um 500 genérico via o handler de exceção global. `POST /processes/:id/chat` agora captura esse `RuntimeError` e responde 422 com uma mensagem clara ("Não foi possível aplicar esta instrução ao diagrama. Tente reformular o pedido ou dividir em passos menores.") em vez de "Erro interno do servidor"
 - Testes de regressão: `test_bpmn_validator.py` (pool sobrepondo filhos é válido; duas formas de processo sobrepostas continua inválido) e `test_chat_api.py` (falha do refinador vira 422, não 500)
 
+### Backend — modelo de IA e precisão semântica da modelagem (feedback de uso real)
+- **[Contexto]** Após validar manualmente, a PO reportou que o modelo gerava BPMN semanticamente pobre: sempre `exclusiveGateway` (nunca paralelo/inclusivo), sempre `bpmn:task` genérico (nunca diferenciava atividade manual/de usuário/de sistema), confundia pool com raia, nunca criava pools "caixa preta" para atores externos, e não usava anotações. Consultamos a API do Gemini com a chave real do projeto para ver os modelos disponíveis — a causa raiz é que `gemini-flash-lite-latest` (usado desde a Fase 2) é o modelo mais barato e mais fraco da família, otimizado para custo/velocidade em vez de instrução complexa; trocar para um modelo *ainda mais barato* pioraria a qualidade, não melhoraria
+- **[Modelo]** `.env`: `GEMINI_MODEL_GENERATION` e `GEMINI_MODEL_REFINEMENT` agora usam `gemini-2.5-flash` (~$0.30 entrada / $2.50 saída por 1M tokens — 3-6× mais caro que o flash-lite, mas ainda bem econômico frente aos tiers "pro"/"3.5-flash"). `GEMINI_MODEL_TRANSCRIPTION` continua em `gemini-flash-lite-latest`: transcrição de áudio é tarefa simples, não precisa do raciocínio extra
+- **[Prompts]** Novo `backend/app/services/bpmn_prompts.py`: regras semânticas de modelagem compartilhadas entre gerador e refinador (evita as duas versões divergirem) —
+  - **Tipos de gateway**: critério explícito para escolher exclusiveGateway (XOR, um caminho) vs parallelGateway (AND, todos os caminhos) vs inclusiveGateway (OR, um ou mais caminhos), com exigência de gateway de junção do mesmo tipo quando aplicável
+  - **Tipos de atividade**: critério para manualTask (trabalho físico, sem sistema) vs userTask (pessoa + sistema) vs serviceTask (automático, sem humano) vs businessRuleTask (regra de negócio) vs send/receiveTask (troca de mensagem), com `task` genérico só quando o modo não estiver claro
+  - **Pool vs raia**: raia (`bpmn:lane`) para atores do MESMO processo/organização; pool separado (`bpmn:participant`) para organizações/sistemas EXTERNOS trocando mensagem com o processo; pool "caixa preta" (sem laneSet, sem elementos internos) para representar esse ator externo sem detalhar seu processo interno; instrução explícita para não forçar pool/raia em processos de ator único
+  - **Anotações**: uso de `bpmn:textAnnotation` + `bpmn:association` para explicar critérios de decisão em gateways e regras de negócio, com moderação
+- **[Layout]** `bpmn_layout.py` (usado só na geração inicial — Fase 3) estendido para calcular automaticamente as coordenadas de pools, raias e anotações, já que o LLM não gera mais `bpmndi:*` diretamente:
+  - Raias viram faixas horizontais empilhadas; a sub-linha de cada nó dentro da raia é calculada localmente (mesma lógica de grade sem colisão já usada no fluxo principal), preservando a coluna global para alinhamento horizontal entre raias
+  - O pool principal (participant cujo `processRef` aponta para o processo com os nós do fluxo) é dimensionado para envolver todas as suas raias
+  - Pools "caixa preta" (participant sem `processRef` correspondente) são posicionados acima do conteúdo principal, empilhados se houver mais de um
+  - Anotações ficam numa faixa dedicada acima de todo o resto do diagrama (evita qualquer risco de sobreposição, ao custo de não ficarem coladas ao elemento associado); a linha de associação conecta ao elemento mesmo assim
+  - Nós referenciados num `laneSet` mas sem raia correspondente (erro do LLM) caem numa raia implícita extra, para nunca perder um elemento do layout
+  - `bpmn_validator.py`: a checagem de sobreposição já ignorava `participant`/`lane` (ver bugfix acima) — mantida e agora exercitada de verdade por esses novos cenários
+
 ### Frontend — painel de administração de uso de IA
 - `src/app/(dashboard)/admin/usage/page.tsx` (novo): página com cards de totais (chamadas, tokens, custo estimado), tabela por etapa, tabela por dia e tabela de chamadas recentes; seletor de janela (7/30/90 dias); usuários não-admin veem mensagem de acesso negado em vez da página
 - `src/components/sidebar.tsx`: novo item "Uso de IA" na navegação, visível apenas quando `GET /auth/me` retorna `role === "admin"`
@@ -37,23 +53,25 @@ Dois pedidos diretos encadeados nesta sprint: (1) reduzir o custo por rodada do 
 ### Testes
 - Suíte de `bpmn_generator`, `bpmn_refiner` e `transcription` reescrita para mockar `response.parsed` (structured output) em vez de `response.text` + JSON manual
 - `test_llm_usage.py`: extração de tokens, estimativa de custo, desconto de cache, modelo desconhecido, `usage_metadata` ausente, **e** `record_usage()` — persiste quando há `tenant_id`, pula persistência sem `tenant_id`, aceita string ou UUID, e não propaga exceção se o banco falhar
-- `test_bpmn_layout.py`: injeção do diagrama, validade BPMN do resultado, namespaces DI, processo com ramificação sem sobreposição, **processo com loop de retrabalho não trava o cálculo**, erro tratável em XML malformado ou sem elementos reconhecíveis
+- `test_bpmn_layout.py`: injeção do diagrama, validade BPMN do resultado, namespaces DI, processo com ramificação sem sobreposição, **processo com loop de retrabalho não trava o cálculo**, erro tratável em XML malformado ou sem elementos reconhecíveis, **e a nova classe `TestApplyLayoutWithPools`**: raias geram BPMN válido sem sobreposição, pool e raias marcados `isHorizontal`, pool "caixa preta" presente e válido, anotação + associação presentes e numa faixa acima do conteúdo principal, nó órfão (fora de qualquer raia) ainda é posicionado sem travar o cálculo
 - `test_admin_usage_api.py` (novo, integração): 401 sem autenticação, 403 para não-admin, totais/quebras corretos para admin, **isolamento entre tenants** (uso de outro tenant não aparece), filtro por `days` exclui logs antigos
 - `conftest.py`: novo fixture `db_session` para testes que precisam seedar dados sem endpoint próprio (caso do `LlmUsageLog`, escrito só pelo pipeline de IA)
 - Frontend: `page.test.tsx` (novo) para a página de admin — bloqueio para não-admin, renderização de totais e quebra por etapa para admin
 
 ## Métricas
-- Pontos planejados: 22 (Fases 0-3 do plano de otimização) + ~5 (painel de admin, versão simples) = 27; +1 pt para o bugfix de validação (achado em validação manual, não estava no escopo original)
-- Pontos entregues: 28
-- Cobertura de testes (backend, `app/services/`): 100% em todos os serviços tocados (`llm_usage.py`, `bpmn_generator.py`, `bpmn_refiner.py`, `transcription.py`); `bpmn_validator.py` em 98%; `bpmn_layout.py` em 95%
-- Testes passando (backend): 178/179 (1 skip, mesmo skip pré-existente de sempre)
+- Pontos planejados: 22 (Fases 0-3 do plano de otimização) + ~5 (painel de admin, versão simples) = 27; +1 pt para o bugfix de validação; +5 pts para troca de modelo + regras semânticas + extensão do auto-layout (pools/raias/anotações), ambos achados durante a validação manual, fora do escopo original
+- Pontos entregues: 33
+- Cobertura de testes (backend, `app/services/`): 100% em todos os serviços tocados (`llm_usage.py`, `bpmn_generator.py`, `bpmn_refiner.py`, `transcription.py`); `bpmn_validator.py` em 98%; `bpmn_layout.py` em 97%
+- Testes passando (backend): 185/186 (1 skip, mesmo skip pré-existente de sempre)
 - Testes passando (frontend): 7/7 (5 pré-existentes + 2 novos da página de admin)
 - `ruff check`/`ruff format` (backend): limpos em todos os arquivos tocados nesta release
 - `tsc --noEmit` / `npm run lint` (frontend): limpos
 
 ## O que ficou para a próxima sprint
-- **Fase 4 do plano de otimização (ajustes data-driven)**: com a instrumentação rodando em produção por um tempo, reavaliar `max_retries`, decidir se vale explicit context caching, testar modelo mais barato no refinamento
-- Validação manual fim a fim com chave real do Gemini (corpus de 5-8 transcrições) para confirmar ganho de tokens/custo/latência na prática, e para popular o painel de admin com dados reais — está em andamento pela própria PO em paralelo a esta release
+- **Fase 4 do plano de otimização (ajustes data-driven)**: com a instrumentação rodando em produção por um tempo, reavaliar `max_retries`, decidir se vale explicit context caching, e reavaliar se `gemini-2.5-flash` é suficiente ou se algum caso de uso precisa de um tier mais capaz
+- Validação manual fim a fim com o novo modelo (corpus de 5-8 transcrições, incluindo processos com múltiplos atores e decisões condicionais) para confirmar que gateways/tipos de atividade/pools-raias/anotações realmente saem corretos na prática — a extensão do auto-layout foi validada com XML sintético nos testes, não ainda com saída real do `gemini-2.5-flash`
+- Anotações posicionadas numa faixa fixa acima do diagrama, não coladas ao elemento associado — aceitável para não arriscar sobreposição, mas pode valer a pena revisitar se ficar visualmente confuso em diagramas com muitas anotações
+- Layout de raias com múltiplos gateways ramificando dentro da mesma raia pode gerar raias bem altas (cada ramo vira uma sub-linha) — sem problema de corretude, mas vale observar em processos reais mais complexos
 - Painel de admin — versão simples entregue (totais, por etapa, por dia, log recente). Ficou fora do escopo desta entrega, para uma v2 se fizer sentido: gráficos, filtro por processo/projeto específico, exportação (CSV), visão cross-tenant para uso interno da operadora da plataforma (hoje deliberadamente restrito ao próprio tenant do admin)
 - Sprint 9 planejada (`docs/sprints/SPRINT-9-plano.md`, animação de fluxo/gargalos no BPMN) segue não iniciada — vira a próxima release numerada (S10)
 
@@ -66,18 +84,23 @@ Dois pedidos diretos encadeados nesta sprint: (1) reduzir o custo por rodada do 
 - Falha ao persistir o log de uso nunca derruba a geração/refino do BPMN — é instrumentação, não caminho crítico
 - Pools (`bpmn:participant`)/raias (`bpmn:lane`) são excluídos da checagem de sobreposição de formas por serem containers — a validação de overlap agora reflete a semântica real da notação BPMN, não só geometria bruta de retângulos
 - Erros de negócio esperados (ex: LLM não conseguir produzir BPMN válido após os retries) devem sempre virar um HTTP 4xx com mensagem acionável no endpoint, nunca vazar como 500 genérico do handler global — padrão a repetir em futuros pontos de integração com o Gemini
+- Modelo mais barato ≠ modelo melhor para tarefas que exigem raciocínio sobre regras complexas (tipos de gateway, tipos de atividade, pool vs raia): `gemini-flash-lite-latest` é otimizado para custo/velocidade, não para seguir instruções elaboradas. Consultamos a lista real de modelos disponíveis via API antes de recomendar, em vez de assumir nomes/preços de memória
+- Transcrição continua no modelo mais barato (`gemini-flash-lite-latest`) — é a única etapa que não exige esse tipo de raciocínio semântico, então subir seu custo não traria benefício
+- Regras semânticas de modelagem centralizadas em `bpmn_prompts.py` (compartilhadas entre gerador e refinador) em vez de duplicadas — evita as duas prompts divergirem quando alguma regra precisar de ajuste no futuro
+- Anotações posicionadas numa faixa própria acima do diagrama (não coladas ao elemento associado) — troca deliberada de proximidade visual por garantia de zero sobreposição, já que buscar posição exata perto do elemento associado exigiria lógica de colisão bem mais complexa para um ganho estético incerto
 
 ## Como testar esta release
-1. `docker compose up -d --build` (backend e frontend mudaram)
+1. `docker compose up -d --build` (backend e frontend mudaram) — o `.env` já foi atualizado com `GEMINI_MODEL_GENERATION`/`GEMINI_MODEL_REFINEMENT=gemini-2.5-flash`; confirme com `docker compose exec backend python -c "from app.core.config import settings; print(settings.gemini_model_generation, settings.gemini_model_refinement)"`
 2. `docker compose exec backend alembic upgrade head` → aplica a migration `003_create_llm_usage_logs`
-3. `docker compose exec backend pytest -q` → 178 passed, 1 skipped
+3. `docker compose exec backend pytest -q` → 185 passed, 1 skipped
 4. `docker compose exec backend pytest --cov=app.services --cov-report=term-missing -q` → confirmar serviços tocados em 95-100%
 5. `docker compose exec frontend npx tsc --noEmit && npm run lint && npx vitest run` → limpo, 7/7 testes
-6. Teste manual (requer `GEMINI_API_KEY` real, em andamento pela PO): subir um áudio de entrevista → conferir que o BPMN gerado não tem formas sobrepostas → pedir no chat para representar os atores/participantes do processo (cenário que disparava o bug 500) e confirmar que o refino conclui normalmente → logar como o usuário admin (primeiro usuário de cada tenant é sempre admin) → abrir "Uso de IA" na sidebar → conferir que os totais/tabelas batem com o processo recém-criado
+6. Teste manual (requer `GEMINI_API_KEY` real, em andamento pela PO): subir um áudio de entrevista que tenha decisão condicional (gateway) e mais de um ator → conferir se o BPMN gerado usa o tipo de gateway certo (exclusivo/paralelo), tipos de atividade diferenciados (não só `task` genérico), e se atores viram raias dentro do mesmo pool → pedir no chat para representar os atores/participantes do processo (cenário que disparava o bug 500) e confirmar que o refino conclui normalmente → logar como o usuário admin (primeiro usuário de cada tenant é sempre admin) → abrir "Uso de IA" na sidebar → conferir que os totais/tabelas batem com o processo recém-criado e que o custo por chamada subiu (esperado, `gemini-2.5-flash` é mais caro que o `flash-lite` anterior)
 7. Testar isolamento: criar um segundo tenant e confirmar que `GET /api/v1/admin/usage` dele não mostra nenhum dado do primeiro
 8. Testar permissão: convidar um membro com papel "viewer"/"analyst" e confirmar que `/admin/usage` retorna 403 e a página mostra a mensagem de acesso negado
 
 ## Bugs conhecidos
 - **Corrigido durante a validação manual desta release**: pedir ao chat para representar atores/participantes do processo (pool BPMN) sempre falhava com 500 "Erro interno do servidor" após esgotar os retries — causa raiz e correção detalhadas na seção "Backend — correção de bug real" acima. Coberto por teste de regressão.
+- **Corrigido durante a mesma validação, achado pela PO**: o modelo (`gemini-flash-lite-latest`) modelava BPMN semanticamente pobre — sempre gateway exclusivo, sempre `task` genérico, confundia pool com raia, nunca criava pools "caixa preta", nunca usava anotações. Corrigido com troca de modelo (`gemini-2.5-flash` para geração/refino) + regras semânticas explícitas nos prompts + extensão do auto-layout para suportar pools/raias/anotações. Validado com XML sintético nos testes automatizados; validação com saída real do novo modelo fica para a PO confirmar na prática (ver "O que ficou para a próxima sprint").
 - Nenhum outro bug novo introduzido por esta release, até onde os testes cobrem. O bug do retry do gerador (histórico não incluía a resposta do modelo, de uma sessão anterior desta mesma sprint) já estava corrigido e segue coberto por teste.
 - Débito técnico pré-existente (não desta release, não regressão): erros de `ruff` em `bottleneck_analysis.py`/`documentation.py`/`bpmn_validator.py`, listados desde `RELEASE-S8.md`, ainda não tratados — nenhum arquivo tocado nesta release está entre eles.
