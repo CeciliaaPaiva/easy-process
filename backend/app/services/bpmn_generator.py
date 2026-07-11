@@ -1,66 +1,55 @@
-import json
-import re
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services.bpmn_layout import LayoutError, apply_layout
 from app.services.bpmn_validator import validate_bpmn_xml
+from app.services.llm_usage import log_usage
 
-_GENERATION_PROMPT = """\
+_SYSTEM_INSTRUCTION = """\
 Você é um especialista em modelagem de processos BPMN 2.0.
 
-Analise a transcrição de uma entrevista e gere:
+Analise a transcrição de uma entrevista fornecida pelo usuário e gere:
 1. Um diagrama BPMN 2.0 em XML válido com startEvent, endEvent, Tasks e SequenceFlows
 2. Um resumo do processo (máx 200 palavras)
 3. Lista de atores/participantes identificados
 4. Lista de tarefas com responsável
 
-IMPORTANTE sobre IDs: cada elemento no XML deve ter um id único. Os elementos de
-diagrama (bpmndi:BPMNShape e bpmndi:BPMNEdge) NUNCA podem reutilizar o id do
-elemento semântico que representam — use um id diferente, ex: BPMNEdge
-id="Edge_SequenceFlow_1" bpmnElement="SequenceFlow_1" (não id="SequenceFlow_1").
+IMPORTANTE sobre o XML: gere APENAS os elementos semânticos do processo dentro
+de bpmn:definitions/bpmn:process — startEvent, endEvent, tasks, gateways e
+sequenceFlows, cada um com um id único. NÃO inclua bpmndi:BPMNDiagram nem
+qualquer elemento de diagrama/layout (BPMNShape, BPMNEdge, Bounds, waypoint) —
+o layout visual é calculado automaticamente depois, fora do seu XML. NÃO
+adicione atributos de cor/estilo nem namespaces além de bpmn.
 
-REGRAS DE LAYOUT (BPMNDI) — siga exatamente para as setas nunca cruzarem por
-cima das formas:
-- Fluxo principal em uma ÚNICA linha horizontal (mesmo y para todos os
-  elementos do caminho principal); só use uma segunda linha (offset vertical
-  de pelo menos 150px) para ramos alternativos de gateways.
-- Tamanhos fixos: startEvent/endEvent = 36x36; task = 100x80;
-  exclusiveGateway = 50x50.
-- Espaçamento horizontal fixo de 150px entre o fim de uma forma e o início da
-  próxima (ex: task em x=200 largura 100 termina em x=300; a próxima forma
-  começa em x=450).
-- Alinhe verticalmente pelo centro: todas as formas da mesma linha devem ter
-  o centro vertical (y + altura/2) idêntico.
-- Waypoints de bpmndi:BPMNEdge devem sair do centro da borda DIREITA da forma
-  de origem (x_origem + largura, y_origem + altura/2) e entrar no centro da
-  borda ESQUERDA da forma de destino (x_destino, y_destino + altura/2) — uma
-  linha reta horizontal, sem desvios, quando ambas estão na mesma linha.
-- NUNCA posicione uma forma cujo retângulo (x, y, largura, altura) sobreponha
-  o retângulo de outra forma ou o caminho de uma aresta.
-- NÃO adicione atributos de cor/estilo (ex: bioc:stroke, bioc:fill, cor de
-  destaque) nem qualquer namespace que não esteja declarado no elemento raiz
-  bpmn:definitions. Use apenas os namespaces bpmn, bpmndi, dc e di.
-
-TRANSCRIÇÃO:
-{transcription}
-
-Responda APENAS com JSON válido, sem texto antes ou depois:
-{{
-  "bpmn_xml": "<?xml version='1.0'?><bpmn:definitions ...>...</bpmn:definitions>",
-  "summary": "...",
-  "actors": ["Ator 1", "Ator 2"],
-  "tasks": [{{"name": "Tarefa", "responsible": "Ator"}}]
-}}"""
+Responda respeitando estritamente o schema JSON fornecido."""
 
 _RETRY_PROMPT = """\
-A resposta anterior estava incorreta ou o BPMN era inválido.
-Retorne SOMENTE JSON válido sem texto adicional.
-O campo bpmn_xml deve ser XML BPMN 2.0 bem-formado começando com '<?xml'.
-Erro: {error}
-Tente novamente."""
+O XML retornado a seguir é inválido: {error}
+
+XML INVÁLIDO:
+{invalid_xml}
+
+Corrija o problema apontado — lembre-se de gerar apenas os elementos
+semânticos do processo, sem bpmndi:BPMNDiagram — e retorne o JSON completo
+novamente."""
+
+
+class _BpmnTask(BaseModel):
+    name: str
+    responsible: str
+
+
+class _BpmnGenerationSchema(BaseModel):
+    bpmn_xml: str
+    summary: str
+    actors: list[str]
+    tasks: list[_BpmnTask]
 
 
 @dataclass
@@ -74,62 +63,71 @@ class BpmnGenerationResult:
 class BpmnGeneratorService:
     def __init__(self) -> None:
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._model_name = settings.GEMINI_MODEL
+        self._model_name = settings.gemini_model_generation
 
     async def generate(
-        self, transcription: str, max_retries: int = 3
+        self,
+        transcription: str,
+        max_retries: int = 3,
+        process_id: str | None = None,
     ) -> BpmnGenerationResult:
         if not transcription or len(transcription.strip()) < 50:
             raise ValueError("Transcrição muito curta ou vazia (mínimo 50 caracteres)")
 
-        messages: list[types.Content] = []
-        initial_prompt = _GENERATION_PROMPT.format(transcription=transcription[:50_000])
+        transcription = transcription[:50_000]
+        config = types.GenerateContentConfig(
+            system_instruction=_SYSTEM_INSTRUCTION,
+            response_mime_type="application/json",
+            response_schema=_BpmnGenerationSchema,
+            temperature=0.1,
+        )
+
         last_error = "formato inválido"
+        prompt = f"TRANSCRIÇÃO:\n{transcription}"
 
         for attempt in range(1, max_retries + 1):
-            user_msg = initial_prompt if attempt == 1 else _RETRY_PROMPT.format(error=last_error)
-            messages.append(types.Content(role="user", parts=[types.Part(text=user_msg)]))
-
             response = await self._client.aio.models.generate_content(
                 model=self._model_name,
-                contents=messages,
+                contents=prompt,
+                config=config,
             )
-            raw = response.text
-            data = self._parse_json(raw)
+            log_usage(
+                "bpmn_generation", process_id, response, self._model_name, attempt
+            )
 
+            data = response.parsed
             if data is not None:
-                bpmn = data.get("bpmn_xml", "")
-                valid, err = validate_bpmn_xml(bpmn)
+                try:
+                    bpmn_with_layout = apply_layout(data.bpmn_xml)
+                except LayoutError as exc:
+                    last_error = str(exc)
+                    prompt = _RETRY_PROMPT.format(
+                        error=last_error, invalid_xml=data.bpmn_xml
+                    )
+                    continue
+
+                valid, err = validate_bpmn_xml(bpmn_with_layout)
                 if valid:
                     return BpmnGenerationResult(
-                        bpmn_xml=bpmn,
-                        summary=data.get("summary", ""),
-                        actors=data.get("actors", []),
-                        tasks=data.get("tasks", []),
+                        bpmn_xml=bpmn_with_layout,
+                        summary=data.summary,
+                        actors=data.actors,
+                        tasks=[t.model_dump() for t in data.tasks],
                     )
                 last_error = err
+                prompt = _RETRY_PROMPT.format(error=err, invalid_xml=data.bpmn_xml)
             else:
                 last_error = "JSON inválido na resposta"
+                prompt = (
+                    f"TRANSCRIÇÃO:\n{transcription}\n\n"
+                    "A resposta anterior não seguiu o schema JSON esperado. "
+                    "Retorne novamente respeitando o schema."
+                )
 
         raise RuntimeError(
             f"Não foi possível gerar BPMN válido após {max_retries} tentativas. "
             f"Último erro: {last_error}"
         )
-
-    def _parse_json(self, text: str) -> dict | None:
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        return None
 
 
 bpmn_generator_service = BpmnGeneratorService()

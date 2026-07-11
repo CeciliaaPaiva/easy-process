@@ -406,6 +406,7 @@ async def send_chat_message(
         bpmn_xml=process.bpmn_xml,
         instruction=data.message,
         history=history,
+        process_id=str(process_id),
     )
 
     process.version += 1

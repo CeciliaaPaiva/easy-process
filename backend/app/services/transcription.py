@@ -1,13 +1,14 @@
-import json
 import logging
 import mimetypes
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services.llm_usage import log_usage
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +18,7 @@ _SYSTEM_INSTRUCTION = (
     "Responda SOMENTE com JSON válido, sem markdown, sem texto antes ou depois."
 )
 
-_PROMPT = """\
-Transcreva o áudio a seguir e retorne um JSON com a seguinte estrutura:
-{
-  "text": "transcrição completa do áudio",
-  "language": "código do idioma detectado, ex: pt",
-  "duration": duração aproximada do áudio em segundos (número)
-}"""
+_PROMPT = "Transcreva o áudio a seguir."
 
 _MIME_TYPES = {
     ".mp3": "audio/mp3",
@@ -34,17 +29,15 @@ _MIME_TYPES = {
 }
 
 
-@dataclass
-class TranscriptionSegment:
-    start: float
-    end: float
+class _TranscriptionSchema(BaseModel):
     text: str
+    language: str
+    duration: float
 
 
 @dataclass
 class TranscriptionResult:
     text: str
-    segments: list[TranscriptionSegment] = field(default_factory=list)
     language: str = "pt"
     duration: float = 0.0
 
@@ -52,7 +45,7 @@ class TranscriptionResult:
 class TranscriptionService:
     def __init__(self) -> None:
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._model_name = settings.GEMINI_MODEL
+        self._model_name = settings.gemini_model_transcription
 
     def _mime_type(self, path: Path) -> str:
         mime_type = _MIME_TYPES.get(path.suffix.lower())
@@ -61,7 +54,9 @@ class TranscriptionService:
         guessed, _ = mimetypes.guess_type(path.name)
         return guessed or "audio/mpeg"
 
-    async def transcribe(self, audio_path: str) -> TranscriptionResult:
+    async def transcribe(
+        self, audio_path: str, process_id: str | None = None
+    ) -> TranscriptionResult:
         path = Path(audio_path)
         if not path.exists():
             raise FileNotFoundError(f"Arquivo não encontrado: {audio_path}")
@@ -77,20 +72,23 @@ class TranscriptionService:
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_INSTRUCTION,
                 response_mime_type="application/json",
+                response_schema=_TranscriptionSchema,
+                temperature=0.0,
             ),
         )
+        log_usage("transcription", process_id, response, self._model_name)
 
-        raw = response.text.strip()
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            logger.error("Resposta do Gemini não é JSON válido: %s", raw[:200])
-            raise RuntimeError("Falha ao transcrever áudio: resposta inválida da IA") from exc
+        parsed = response.parsed
+        if parsed is None:
+            logger.error(
+                "Resposta do Gemini não é JSON válido: %s", (response.text or "")[:200]
+            )
+            raise RuntimeError("Falha ao transcrever áudio: resposta inválida da IA")
 
         return TranscriptionResult(
-            text=data.get("text", ""),
-            language=data.get("language", "pt"),
-            duration=float(data.get("duration") or 0.0),
+            text=parsed.text,
+            language=parsed.language or "pt",
+            duration=float(parsed.duration or 0.0),
         )
 
 

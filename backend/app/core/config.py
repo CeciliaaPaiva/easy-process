@@ -13,6 +13,21 @@ class Settings(BaseSettings):
 
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-flash-lite-latest"
+    GEMINI_MODEL_TRANSCRIPTION: str = ""
+    GEMINI_MODEL_GENERATION: str = ""
+    GEMINI_MODEL_REFINEMENT: str = ""
+
+    @property
+    def gemini_model_transcription(self) -> str:
+        return self.GEMINI_MODEL_TRANSCRIPTION or self.GEMINI_MODEL
+
+    @property
+    def gemini_model_generation(self) -> str:
+        return self.GEMINI_MODEL_GENERATION or self.GEMINI_MODEL
+
+    @property
+    def gemini_model_refinement(self) -> str:
+        return self.GEMINI_MODEL_REFINEMENT or self.GEMINI_MODEL
 
     UPLOAD_DIR: str = "/data/uploads"
     MAX_UPLOAD_SIZE_MB: int = 100

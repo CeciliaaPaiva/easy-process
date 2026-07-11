@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,10 +6,20 @@ import pytest
 from app.services.transcription import TranscriptionResult, TranscriptionService
 
 
-def _make_gemini_response(data: dict) -> MagicMock:
+def _make_response(parsed: object) -> MagicMock:
     resp = MagicMock()
-    resp.text = json.dumps(data)
+    resp.parsed = parsed
+    resp.text = "" if parsed is None else "{}"
+    resp.usage_metadata = None
     return resp
+
+
+def _parsed(data: dict) -> MagicMock:
+    parsed = MagicMock()
+    parsed.text = data["text"]
+    parsed.language = data["language"]
+    parsed.duration = data["duration"]
+    return parsed
 
 
 class TestTranscriptionService:
@@ -23,16 +32,13 @@ class TestTranscriptionService:
         audio_file = tmp_path / "audio.mp3"
         audio_file.write_bytes(b"fake audio data")
 
+        transcript = "Analista recebe o pedido e encaminha para aprovação."
         mocker.patch.object(
             service._client.aio.models,
             "generate_content",
             new=AsyncMock(
-                return_value=_make_gemini_response(
-                    {
-                        "text": "Analista recebe o pedido e encaminha para aprovação.",
-                        "language": "pt",
-                        "duration": 6.5,
-                    }
+                return_value=_make_response(
+                    _parsed({"text": transcript, "language": "pt", "duration": 6.5})
                 )
             ),
         )
@@ -60,8 +66,8 @@ class TestTranscriptionService:
             service._client.aio.models,
             "generate_content",
             new=AsyncMock(
-                return_value=_make_gemini_response(
-                    {"text": "", "language": "pt", "duration": 0}
+                return_value=_make_response(
+                    _parsed({"text": "", "language": "pt", "duration": 0})
                 )
             ),
         )
@@ -78,12 +84,10 @@ class TestTranscriptionService:
         audio_file = tmp_path / "audio.mp3"
         audio_file.write_bytes(b"fake audio data")
 
-        resp = MagicMock()
-        resp.text = "não é json"
         mocker.patch.object(
             service._client.aio.models,
             "generate_content",
-            new=AsyncMock(return_value=resp),
+            new=AsyncMock(return_value=_make_response(None)),
         )
 
         with pytest.raises(RuntimeError, match="Falha ao transcrever"):

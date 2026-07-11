@@ -1,26 +1,18 @@
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.services.bpmn_validator import validate_bpmn_xml
+from app.services.llm_usage import log_usage
 
-_REFINER_SYSTEM = (
-    "Você é um especialista em modelagem de processos BPMN 2.0. "
-    "Recebe um diagrama BPMN em XML e uma instrução do usuário. "
-    "Retorna SOMENTE JSON válido, sem texto adicional."
-)
-
-_REFINER_PROMPT = """\
-BPMN ATUAL:
-{bpmn_xml}
-
-INSTRUÇÃO DO USUÁRIO: {instruction}
+_REFINER_SYSTEM = """\
+Você é um especialista em modelagem de processos BPMN 2.0.
+Recebe um diagrama BPMN em XML e uma instrução do usuário para alterá-lo.
 
 IMPORTANTE sobre IDs: cada elemento no XML deve ter um id único. Os elementos de
 diagrama (bpmndi:BPMNShape e bpmndi:BPMNEdge) NUNCA podem reutilizar o id do
@@ -49,16 +41,27 @@ cima das formas, mesmo ao alterar o BPMN existente:
   destaque) nem qualquer namespace que não esteja declarado no elemento raiz
   bpmn:definitions. Use apenas os namespaces bpmn, bpmndi, dc e di.
 
-Responda APENAS com JSON válido:
-{{
-  "bpmn_xml": "<?xml version='1.0'?>...",
-  "change_description": "Descrição do que foi alterado"
-}}"""
+Responda respeitando estritamente o schema JSON fornecido."""
 
-_RETRY_PROMPT = (
-    "O XML retornado é inválido: {error}. "
-    "Retorne apenas JSON com bpmn_xml BPMN 2.0 válido contendo startEvent e endEvent."
-)
+_REFINER_PROMPT = """\
+BPMN ATUAL:
+{bpmn_xml}
+
+INSTRUÇÃO DO USUÁRIO: {instruction}"""
+
+_RETRY_PROMPT = """\
+O XML retornado a seguir é inválido: {error}
+
+XML INVÁLIDO:
+{invalid_xml}
+
+Corrija o problema apontado, respeitando as mesmas regras de IDs e layout, e
+retorne o JSON completo novamente."""
+
+
+class _BpmnRefinementSchema(BaseModel):
+    bpmn_xml: str
+    change_description: str
 
 
 @dataclass
@@ -70,7 +73,7 @@ class BpmnRefinementResult:
 class BpmnRefinerService:
     def __init__(self) -> None:
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._model_name = settings.GEMINI_MODEL
+        self._model_name = settings.gemini_model_refinement
 
     async def refine(
         self,
@@ -78,12 +81,14 @@ class BpmnRefinerService:
         instruction: str,
         history: list[dict[str, str]],
         max_retries: int = 3,
+        process_id: str | None = None,
     ) -> BpmnRefinementResult:
         if not bpmn_xml or not instruction.strip():
             raise ValueError("BPMN e instrução são obrigatórios")
 
-        # Converte histórico: "assistant" → "model" (formato Gemini)
-        contents: list[types.Content] = [
+        # Histórico de chat é curto (mensagens do usuário + change_description das
+        # respostas anteriores) — não contém XML, então é seguro reenviar inteiro.
+        base_contents: list[types.Content] = [
             types.Content(
                 role="model" if msg["role"] == "assistant" else "user",
                 parts=[types.Part(text=msg["content"])],
@@ -91,60 +96,53 @@ class BpmnRefinerService:
             for msg in history
         ]
 
-        user_prompt = _REFINER_PROMPT.format(bpmn_xml=bpmn_xml, instruction=instruction)
-        contents.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
+        config = types.GenerateContentConfig(
+            system_instruction=_REFINER_SYSTEM,
+            response_mime_type="application/json",
+            response_schema=_BpmnRefinementSchema,
+            temperature=0.1,
+        )
 
         last_error = "formato inválido"
-        config = types.GenerateContentConfig(system_instruction=_REFINER_SYSTEM)
+        prompt = _REFINER_PROMPT.format(bpmn_xml=bpmn_xml, instruction=instruction)
 
         for attempt in range(1, max_retries + 1):
+            contents = [
+                *base_contents,
+                types.Content(role="user", parts=[types.Part(text=prompt)]),
+            ]
+
             response = await self._client.aio.models.generate_content(
                 model=self._model_name,
                 contents=contents,
                 config=config,
             )
+            log_usage(
+                "bpmn_refinement", process_id, response, self._model_name, attempt
+            )
 
-            raw = (response.text or "").strip()
-            data = self._parse_json(raw)
-
+            data = response.parsed
             if data is not None:
-                bpmn = data.get("bpmn_xml", "")
-                valid, err = validate_bpmn_xml(bpmn)
+                valid, err = validate_bpmn_xml(data.bpmn_xml)
                 if valid:
                     return BpmnRefinementResult(
-                        bpmn_xml=bpmn,
-                        change_description=data.get("change_description", ""),
+                        bpmn_xml=data.bpmn_xml,
+                        change_description=data.change_description,
                     )
                 last_error = err
+                prompt = _RETRY_PROMPT.format(error=err, invalid_xml=data.bpmn_xml)
             else:
                 last_error = "JSON inválido na resposta"
-
-            if attempt < max_retries:
-                contents.append(types.Content(role="model", parts=[types.Part(text=raw)]))
-                contents.append(
-                    types.Content(
-                        role="user",
-                        parts=[types.Part(text=_RETRY_PROMPT.format(error=last_error))],
-                    )
+                prompt = (
+                    _REFINER_PROMPT.format(bpmn_xml=bpmn_xml, instruction=instruction)
+                    + "\n\nA resposta anterior não seguiu o schema JSON esperado. "
+                    "Retorne novamente respeitando o schema."
                 )
 
         raise RuntimeError(
             f"Não foi possível refinar BPMN após {max_retries} tentativas. "
             f"Último erro: {last_error}"
         )
-
-    def _parse_json(self, text: str) -> dict | None:  # type: ignore[type-arg]
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-        return None
 
 
 bpmn_refiner_service = BpmnRefinerService()

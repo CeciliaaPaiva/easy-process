@@ -1,4 +1,3 @@
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,10 +20,19 @@ MOCK_RESPONSE = {
 }
 
 
-def _make_gemini_response(text: str) -> MagicMock:
+def _make_response(parsed: object) -> MagicMock:
     resp = MagicMock()
-    resp.text = text
+    resp.parsed = parsed
+    resp.text = "" if parsed is None else "{}"
+    resp.usage_metadata = None
     return resp
+
+
+def _parsed(data: dict) -> MagicMock:
+    parsed = MagicMock()
+    parsed.bpmn_xml = data["bpmn_xml"]
+    parsed.change_description = data.get("change_description", "")
+    return parsed
 
 
 class TestBpmnRefinerService:
@@ -42,7 +50,7 @@ class TestBpmnRefinerService:
 
     @pytest.mark.asyncio
     async def test_refine_returns_valid_result(self, service, generate_mock):
-        generate_mock.return_value = _make_gemini_response(json.dumps(MOCK_RESPONSE))
+        generate_mock.return_value = _make_response(_parsed(MOCK_RESPONSE))
 
         result = await service.refine(
             bpmn_xml=VALID_BPMN,
@@ -63,7 +71,7 @@ class TestBpmnRefinerService:
 
     @pytest.mark.asyncio
     async def test_includes_history_in_contents(self, service, generate_mock):
-        generate_mock.return_value = _make_gemini_response(json.dumps(MOCK_RESPONSE))
+        generate_mock.return_value = _make_response(_parsed(MOCK_RESPONSE))
 
         history = [
             {"role": "user", "content": "Mensagem anterior"},
@@ -86,8 +94,8 @@ class TestBpmnRefinerService:
     @pytest.mark.asyncio
     async def test_retries_on_invalid_bpmn(self, service, generate_mock):
         generate_mock.side_effect = [
-            _make_gemini_response('{"bpmn_xml": "invalid", "change_description": ""}'),
-            _make_gemini_response(json.dumps(MOCK_RESPONSE)),
+            _make_response(_parsed({"bpmn_xml": "invalid", "change_description": ""})),
+            _make_response(_parsed(MOCK_RESPONSE)),
         ]
 
         result = await service.refine(VALID_BPMN, "instrução", [], max_retries=2)
@@ -95,7 +103,25 @@ class TestBpmnRefinerService:
 
     @pytest.mark.asyncio
     async def test_raises_after_max_retries(self, service, generate_mock):
-        generate_mock.return_value = _make_gemini_response("não é json")
+        generate_mock.return_value = _make_response(None)
 
         with pytest.raises(RuntimeError, match="tentativas"):
             await service.refine(VALID_BPMN, "instrução", [], max_retries=2)
+
+    @pytest.mark.asyncio
+    async def test_retry_does_not_reaccumulate_history_each_attempt(
+        self, service, generate_mock
+    ):
+        """O retry corrige o XML inválido sem duplicar o histórico de chat a
+        cada tentativa — só o histórico original + 1 prompt do turno atual."""
+        generate_mock.side_effect = [
+            _make_response(_parsed({"bpmn_xml": "invalid", "change_description": ""})),
+            _make_response(_parsed(MOCK_RESPONSE)),
+        ]
+
+        history = [{"role": "user", "content": "Mensagem anterior"}]
+        await service.refine(VALID_BPMN, "instrução", history, max_retries=2)
+
+        second_call_contents = generate_mock.call_args_list[1].kwargs["contents"]
+        assert len(second_call_contents) == len(history) + 1
+        assert "invalid" in second_call_contents[-1].parts[0].text
