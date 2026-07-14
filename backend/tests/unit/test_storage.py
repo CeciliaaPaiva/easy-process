@@ -1,4 +1,5 @@
 import io
+import subprocess
 import uuid
 import wave
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,6 +31,31 @@ def _make_wav_bytes(duration_seconds: float = 1.0, framerate: int = 8000) -> byt
         wav.setframerate(framerate)
         wav.writeframes(b"\x00\x00" * n_frames)
     return buf.getvalue()
+
+
+def _make_streamed_webm_bytes(duration_seconds: float = 3.0) -> bytes:
+    """Gera um WebM sem duração no cabeçalho do container, reproduzindo o que o
+    MediaRecorder do navegador produz: como a saída é um pipe (não seekable), o
+    ffmpeg nunca volta ao início do arquivo para gravar a duração total."""
+    proc = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={duration_seconds}",
+            "-c:a",
+            "libopus",
+            "-f",
+            "webm",
+            "pipe:1",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    return proc.stdout
 
 
 class TestSaveAudio:
@@ -177,3 +203,12 @@ class TestProbeDurationSeconds:
             await _probe_duration_seconds(b"not audio data at all", ".wav")
 
         assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_webm_without_container_duration_falls_back_to_remux(self):
+        # Regressão: gravação feita pelo AudioRecorder do navegador (Chrome/Firefox)
+        # vinha voltando 400 "Não foi possível determinar a duração do áudio" porque
+        # o WebM do MediaRecorder não declara `format.duration` no cabeçalho.
+        content = _make_streamed_webm_bytes(duration_seconds=3.0)
+        duration = await _probe_duration_seconds(content, ".webm")
+        assert duration == pytest.approx(3.0, abs=0.1)

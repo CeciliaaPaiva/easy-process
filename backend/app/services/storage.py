@@ -11,13 +11,40 @@ from app.core.config import settings
 ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".webm"}
 
 
+async def _ffprobe_format_duration(path: str) -> float | None:
+    """Lê `format.duration` via ffprobe. Retorna None se o container não
+    declarar a duração (sem levantar exceção — quem chama decide o que fazer)."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+
+    if proc.returncode != 0:
+        return None
+
+    try:
+        return float(json.loads(stdout)["format"]["duration"])
+    except (KeyError, ValueError, json.JSONDecodeError):
+        return None
+
+
 async def _probe_duration_seconds(content: bytes, ext: str) -> float:
     """Lê a duração do áudio via ffprobe. Levanta HTTPException 400 se o arquivo
     não puder ser decodificado (corrompido ou não é áudio de verdade)."""
     with tempfile.NamedTemporaryFile(suffix=ext) as tmp:
         tmp.write(content)
         tmp.flush()
-        proc = await asyncio.create_subprocess_exec(
+
+        probe = await asyncio.create_subprocess_exec(
             "ffprobe",
             "-v",
             "error",
@@ -29,9 +56,9 @@ async def _probe_duration_seconds(content: bytes, ext: str) -> float:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        stdout, _ = await probe.communicate()
 
-        if proc.returncode != 0:
+        if probe.returncode != 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
@@ -41,12 +68,44 @@ async def _probe_duration_seconds(content: bytes, ext: str) -> float:
             )
 
         try:
-            duration = float(json.loads(stdout)["format"]["duration"])
-        except (KeyError, ValueError, json.JSONDecodeError) as exc:
+            return float(json.loads(stdout)["format"]["duration"])
+        except (KeyError, ValueError, json.JSONDecodeError):
+            pass
+
+        # O WebM gravado pelo MediaRecorder do navegador (Chrome/Firefox) é escrito
+        # "ao vivo": o navegador nunca faz seek de volta ao início do arquivo para
+        # gravar a duração total no cabeçalho, então o container fica sem essa
+        # informação — nem aumentar probesize/analyzeduration resolve, o dado
+        # simplesmente não existe no arquivo. Remuxar com stream copy (sem
+        # recodificar) para um segundo arquivo, esse sim seekable, força o ffmpeg a
+        # recalcular a duração real a partir dos pacotes e gravá-la no cabeçalho.
+        with tempfile.NamedTemporaryFile(suffix=ext) as remuxed:
+            remux = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-i",
+                tmp.name,
+                "-c",
+                "copy",
+                remuxed.name,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await remux.communicate()
+
+            duration = (
+                await _ffprobe_format_duration(remuxed.name)
+                if remux.returncode == 0
+                else None
+            )
+
+        if duration is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Não foi possível determinar a duração do áudio.",
-            ) from exc
+            )
 
         return duration
 
