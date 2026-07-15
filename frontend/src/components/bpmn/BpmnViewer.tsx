@@ -14,9 +14,18 @@ const HIGHLIGHT_MARKER = 'bpmn-suggestion-highlight'
 // Intervalo base (ms) entre disparos automáticos do modo Apresentação, escalado
 // pela velocidade escolhida na BpmnToolbar (0.5x/1x/2x).
 const BASE_TICK_MS = 900
-// Ticks seguidos sem nenhuma subscription pendente = animação chegou ao fim
-// (todos os end events alcançados); reinicia para virar um loop contínuo.
+// Ticks seguidos sem nenhuma subscription pendente antes de considerar
+// reiniciar o loop — é só um debounce contra uma folga isolada entre passos;
+// quem decide de fato que a volta terminou é reachedEndRef (ver abaixo).
 const IDLE_TICKS_TO_LOOP = 2
+// Cada travessia de sequenceFlow é animada (tempo real, pautado por
+// animation.setAnimationSpeed), não instantânea — então "0 subscriptions
+// pendentes" não significa "chegou ao fim", só "nada esperando input" nesse
+// instante; o token pode estar no meio de uma transição animada. Rede de
+// segurança: se ficar ocioso por muito tempo sem NUNCA alcançar um end event
+// (ex.: diagrama com um caminho sem saída), força o reinício mesmo assim, em
+// vez de travar o modo Apresentação para sempre.
+const SAFETY_IDLE_TICKS_TO_FORCE_LOOP = 20
 
 interface BpmnCanvas {
   zoom: (fit: string, center: boolean) => void
@@ -24,10 +33,17 @@ interface BpmnCanvas {
   removeMarker: (elementId: string, cls: string) => void
 }
 
+interface SimulatorElement {
+  id: string
+  type: string
+}
+
 interface Simulator {
   findSubscriptions: (filter: Record<string, never>) => DriverSubscription[]
   trigger: (context: { event: unknown; scope: unknown }) => unknown
   reset: () => void
+  on: (event: string, callback: (payload: { element: SimulatorElement }) => void) => void
+  off: (event: string, callback: (payload: { element: SimulatorElement }) => void) => void
 }
 
 interface ToggleMode {
@@ -39,11 +55,11 @@ interface AnimationService {
 }
 
 interface ExclusiveGatewaySettings {
-  setSequenceFlow: (gateway: { type: string }) => void
+  setSequenceFlow: (gateway: SimulatorElement) => void
 }
 
 interface ElementRegistry {
-  filter: (fn: (el: { type: string }) => boolean) => { type: string }[]
+  get: (id: string) => SimulatorElement | undefined
 }
 
 interface BpmnServices {
@@ -57,21 +73,7 @@ const EXCLUSIVE_GATEWAY_TYPE = 'bpmn:ExclusiveGateway'
 // disparada explicitamente no "kick" (início/reinício de loop); depois disso
 // é ignorada no dreno de subscriptions pendentes.
 const START_EVENT_TYPE = 'bpmn:StartEvent'
-
-// A lib resolve o ramo de cada exclusive gateway só uma vez, ao entrar em modo
-// de simulação (primeiro outgoing por padrão) — sem isso, o loop contínuo do
-// modo Apresentação sempre repetiria o mesmo ramo. Giramos manualmente para o
-// próximo outgoing a cada reinício do loop.
-function rotateExclusiveGateways(services: BpmnServices) {
-  const elementRegistry = services.get('elementRegistry') as ElementRegistry
-  const exclusiveGatewaySettings = services.get(
-    'exclusiveGatewaySettings'
-  ) as ExclusiveGatewaySettings
-
-  for (const gateway of elementRegistry.filter((el) => el.type === EXCLUSIVE_GATEWAY_TYPE)) {
-    exclusiveGatewaySettings.setSequenceFlow(gateway)
-  }
-}
+const END_EVENT_TYPE = 'bpmn:EndEvent'
 
 export type PresentationStatus = 'stopped' | 'playing' | 'paused'
 
@@ -96,14 +98,38 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
   const idleTicksRef = useRef(0)
   const presentationActiveRef = useRef(false)
   const awaitingKickRef = useRef(true)
+  // Ids de exclusive gateway visitados (token passou por eles) desde o último
+  // tick — populado pelo listener `elementChanged` da lib, sincronamente,
+  // durante os `trigger()` do tick anterior. Girar o ramo aqui em cada visita
+  // real (em vez de por tempo/loop completo) é o que faz processos com loop
+  // de retrabalho — o gateway é revisitado várias vezes e o processo nunca
+  // fica ocioso — também alternarem de ramo, ao invés de ficar preso
+  // reciclando sempre o primeiro ramo.
+  const visitedGatewaysRef = useRef<Set<string>>(new Set())
+  // true assim que um end event é alcançado na volta atual — é o sinal real
+  // de "terminou", em vez de inferir pelo número de subscriptions pendentes.
+  const reachedEndRef = useRef(false)
 
   const tick = useCallback(() => {
     const services = viewerRef.current
     if (!services) return
     const simulator = services.get('simulator') as Simulator
 
+    if (visitedGatewaysRef.current.size > 0) {
+      const elementRegistry = services.get('elementRegistry') as ElementRegistry
+      const exclusiveGatewaySettings = services.get(
+        'exclusiveGatewaySettings'
+      ) as ExclusiveGatewaySettings
+      visitedGatewaysRef.current.forEach((id) => {
+        const gateway = elementRegistry.get(id)
+        if (gateway) exclusiveGatewaySettings.setSequenceFlow(gateway)
+      })
+      visitedGatewaysRef.current.clear()
+    }
+
     if (awaitingKickRef.current) {
       // dispara os start events uma única vez para iniciar a instância
+      reachedEndRef.current = false
       for (const sub of simulator.findSubscriptions({})) {
         simulator.trigger({ event: sub.event, scope: sub.scope })
       }
@@ -118,10 +144,12 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
 
     if (subs.length === 0) {
       idleTicksRef.current += 1
-      if (idleTicksRef.current >= IDLE_TICKS_TO_LOOP) {
+      const readyToLoop =
+        idleTicksRef.current >= IDLE_TICKS_TO_LOOP &&
+        (reachedEndRef.current || idleTicksRef.current >= SAFETY_IDLE_TICKS_TO_FORCE_LOOP)
+      if (readyToLoop) {
         idleTicksRef.current = 0
         rotationRef.current.clear()
-        rotateExclusiveGateways(services)
         simulator.reset()
         awaitingKickRef.current = true
       }
@@ -144,8 +172,10 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
   const stopPresentation = useCallback(() => {
     pausePresentationTick()
     rotationRef.current.clear()
+    visitedGatewaysRef.current.clear()
     idleTicksRef.current = 0
     awaitingKickRef.current = true
+    reachedEndRef.current = false
 
     if (presentationActiveRef.current && viewerRef.current) {
       const services = viewerRef.current
@@ -201,6 +231,15 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
       })
       viewerRef.current = viewer as unknown as BpmnServices
       highlightedRef.current = []
+      visitedGatewaysRef.current.clear()
+      reachedEndRef.current = false
+      ;(viewer.get('simulator') as Simulator).on('elementChanged', ({ element }) => {
+        if (element.type === EXCLUSIVE_GATEWAY_TYPE) {
+          visitedGatewaysRef.current.add(element.id)
+        } else if (element.type === END_EVENT_TYPE) {
+          reachedEndRef.current = true
+        }
+      })
 
       try {
         await viewer.importXML(xml)
