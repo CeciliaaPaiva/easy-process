@@ -7,3 +7,15 @@
   stroke-width: 3px !important;
   fill: #fee2e2 !important;
 }
+
+/* Modo Apresentação (bpmn-js-token-simulation) é acionado e controlado via
+   BpmnToolbar, então escondemos os controles/badges flutuantes que a lib
+   injeta sozinha no canvas (toggle badge, palette de play/pause/log, painel
+   de velocidade) para não duplicar UI. */
+.bts-toggle-mode,
+.bts-palette,
+.bts-set-animation-speed,
+.bts-log,
+.bts-notifications {
+  display: none !important;
+}

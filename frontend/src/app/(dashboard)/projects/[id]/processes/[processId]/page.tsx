@@ -3,14 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import {
-  ChevronLeft,
-  Download,
-  History,
-  Loader2,
-  AlertTriangle,
-  RefreshCw,
-} from 'lucide-react'
+import { ChevronLeft, Download, History, Loader2, AlertTriangle, RefreshCw } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import type { Process, ProcessVersion } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -19,14 +12,16 @@ import { ChatWindow } from '@/components/chat/ChatWindow'
 import { DocsPanel } from '@/components/bpmn/DocsPanel'
 import { TranscriptionPanel } from '@/components/bpmn/TranscriptionPanel'
 import { BottleneckPanel } from '@/components/bpmn/BottleneckPanel'
+import { BpmnToolbar, type PresentationSpeed } from '@/components/bpmn/BpmnToolbar'
+import type { PresentationStatus } from '@/components/bpmn/BpmnViewer'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/ui/dialog'
 
 // bpmn-js is browser-only
-const BpmnViewer = dynamic(
-  () => import('@/components/bpmn/BpmnViewer').then((m) => m.BpmnViewer),
-  { ssr: false, loading: () => <Skeleton className="h-full w-full" /> }
-)
+const BpmnViewer = dynamic(() => import('@/components/bpmn/BpmnViewer').then((m) => m.BpmnViewer), {
+  ssr: false,
+  loading: () => <Skeleton className="h-full w-full" />,
+})
 
 const RIGHT_TABS = [
   { key: 'chat', label: 'Chat' },
@@ -76,42 +71,36 @@ function VersionsPanel({
   return (
     <>
       <div className="flex flex-col gap-2">
-        {loading ? (
-          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)
-        ) : (
-          versions.map((v) => (
-            <div
-              key={v.id}
-              className="flex items-center justify-between rounded-lg border border-gray-200 p-3"
-            >
-              <div>
-                <p className="text-sm font-medium text-gray-900">Versão {v.version}</p>
-                <p className="text-xs text-gray-500 line-clamp-1">
-                  {v.change_description ?? 'Sem descrição'}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button
-                  variant="ghost"
-                  className="text-xs"
-                  onClick={() => setPreviewVersion(v)}
-                >
-                  Visualizar
-                </Button>
-                {v.version !== currentVersion && (
-                  <Button
-                    variant="ghost"
-                    className="text-xs"
-                    loading={restoring === v.version}
-                    onClick={() => restore(v)}
-                  >
-                    Restaurar
+        {loading
+          ? Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)
+          : versions.map((v) => (
+              <div
+                key={v.id}
+                className="flex items-center justify-between rounded-lg border border-gray-200 p-3"
+              >
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Versão {v.version}</p>
+                  <p className="text-xs text-gray-500 line-clamp-1">
+                    {v.change_description ?? 'Sem descrição'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button variant="ghost" className="text-xs" onClick={() => setPreviewVersion(v)}>
+                    Visualizar
                   </Button>
-                )}
+                  {v.version !== currentVersion && (
+                    <Button
+                      variant="ghost"
+                      className="text-xs"
+                      loading={restoring === v.version}
+                      onClick={() => restore(v)}
+                    >
+                      Restaurar
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
-        )}
+            ))}
       </div>
 
       <Dialog
@@ -153,6 +142,8 @@ export default function ProcessPage() {
   const [showVersions, setShowVersions] = useState(false)
   const [rightTab, setRightTab] = useState<RightTab>('chat')
   const [highlightIds, setHighlightIds] = useState<string[]>([])
+  const [presentationStatus, setPresentationStatus] = useState<PresentationStatus>('stopped')
+  const [presentationSpeed, setPresentationSpeed] = useState<PresentationSpeed>(1)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadProcess = useCallback(async () => {
@@ -187,19 +178,23 @@ export default function ProcessPage() {
         clearInterval(pollRef.current!)
       }
     }, POLL_INTERVAL_MS)
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [procStatus, processId, loadProcess])
 
   const handleBpmnUpdate = useCallback((xml: string, version: number) => {
     setBpmnXml(xml)
-    setProc((prev) => prev ? { ...prev, bpmn_xml: xml, version } : prev)
+    setProc((prev) => (prev ? { ...prev, bpmn_xml: xml, version } : prev))
+    setPresentationStatus('stopped')
   }, [])
 
   const handleVersionRestore = useCallback((v: ProcessVersion) => {
     setBpmnXml(v.bpmn_xml)
-    setProc((prev) => prev ? { ...prev, bpmn_xml: v.bpmn_xml, version: v.version } : prev)
+    setProc((prev) => (prev ? { ...prev, bpmn_xml: v.bpmn_xml, version: v.version } : prev))
     setShowVersions(false)
+    setPresentationStatus('stopped')
   }, [])
 
   if (loading) {
@@ -240,9 +235,7 @@ export default function ProcessPage() {
             {proc.name}
           </span>
           <StatusBadge status={proc.status} />
-          {isProcessing && (
-            <Loader2 size={14} className="animate-spin text-blue-500" />
-          )}
+          {isProcessing && <Loader2 size={14} className="animate-spin text-blue-500" />}
         </div>
         <div className="flex items-center gap-2">
           {isReady && (
@@ -256,9 +249,11 @@ export default function ProcessPage() {
                 Versões
               </Button>
               <button
-                onClick={() => api.processes.export(processId).catch((err) => {
-                  setError(err instanceof ApiError ? err.message : 'Erro ao exportar BPMN')
-                })}
+                onClick={() =>
+                  api.processes.export(processId).catch((err) => {
+                    setError(err instanceof ApiError ? err.message : 'Erro ao exportar BPMN')
+                  })
+                }
                 className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100"
               >
                 <Download size={14} />
@@ -288,18 +283,32 @@ export default function ProcessPage() {
             <div className="flex flex-col items-center gap-3 text-center">
               <AlertTriangle size={40} className="text-red-400" />
               <p className="font-medium text-gray-700">Erro no processamento</p>
-              <Button
-                variant="ghost"
-                className="gap-1"
-                onClick={() => window.location.reload()}
-              >
+              <Button variant="ghost" className="gap-1" onClick={() => window.location.reload()}>
                 <RefreshCw size={14} />
                 Tentar novamente
               </Button>
             </div>
           )}
           {isReady && bpmnXml && (
-            <BpmnViewer xml={bpmnXml} className="h-full w-full" highlightIds={highlightIds} />
+            <div className="relative h-full w-full">
+              <BpmnViewer
+                xml={bpmnXml}
+                className="h-full w-full"
+                highlightIds={highlightIds}
+                presentation={{ status: presentationStatus, speed: presentationSpeed }}
+              />
+              <div className="absolute right-3 top-3 z-10">
+                <BpmnToolbar
+                  playing={presentationStatus === 'playing'}
+                  speed={presentationSpeed}
+                  onTogglePlay={() =>
+                    setPresentationStatus((s) => (s === 'playing' ? 'paused' : 'playing'))
+                  }
+                  onSpeedChange={setPresentationSpeed}
+                  onStop={() => setPresentationStatus('stopped')}
+                />
+              </div>
+            </div>
           )}
         </div>
 
