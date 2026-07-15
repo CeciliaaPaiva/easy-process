@@ -147,3 +147,106 @@ class TestValidateBpmnXml:
 </bpmn:definitions>"""
         ok, err = validate_bpmn_xml(xml)
         assert ok is True, err
+
+    def test_gateway_combining_merge_and_split_returns_false(self):
+        """Um gateway com >1 entrada E >1 saída ao mesmo tempo trava a
+        simulação/animação quando as entradas vêm de ramos mutuamente
+        exclusivos (a segunda nunca chega). Regressão do bug real relatado
+        no modo Apresentação: token nunca passava do gateway paralelo."""
+        xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Def_1">
+  <bpmn:process id="Process_1" isExecutable="false">
+    <bpmn:startEvent id="Start_1">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:exclusiveGateway id="Gateway_Split" name="Aprovado?">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sim</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Nao</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:task id="Task_A" name="Caminho A">
+      <bpmn:incoming>Flow_Sim</bpmn:incoming>
+      <bpmn:outgoing>Flow_JoinA</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_B" name="Caminho B">
+      <bpmn:incoming>Flow_Nao</bpmn:incoming>
+      <bpmn:outgoing>Flow_JoinB</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:parallelGateway id="Gw_Combinado" name="">
+      <bpmn:incoming>Flow_JoinA</bpmn:incoming>
+      <bpmn:incoming>Flow_JoinB</bpmn:incoming>
+      <bpmn:outgoing>Flow_C</bpmn:outgoing>
+      <bpmn:outgoing>Flow_D</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:task id="Task_C" name="Tarefa C">
+      <bpmn:incoming>Flow_C</bpmn:incoming>
+      <bpmn:outgoing>Flow_End1</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_D" name="Tarefa D">
+      <bpmn:incoming>Flow_D</bpmn:incoming>
+      <bpmn:outgoing>Flow_End2</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="End_1">
+      <bpmn:incoming>Flow_End1</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_2">
+      <bpmn:incoming>Flow_End2</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="Gateway_Split"/>
+    <bpmn:sequenceFlow id="Flow_Sim" sourceRef="Gateway_Split" targetRef="Task_A"/>
+    <bpmn:sequenceFlow id="Flow_Nao" sourceRef="Gateway_Split" targetRef="Task_B"/>
+    <bpmn:sequenceFlow id="Flow_JoinA" sourceRef="Task_A" targetRef="Gw_Combinado"/>
+    <bpmn:sequenceFlow id="Flow_JoinB" sourceRef="Task_B" targetRef="Gw_Combinado"/>
+    <bpmn:sequenceFlow id="Flow_C" sourceRef="Gw_Combinado" targetRef="Task_C"/>
+    <bpmn:sequenceFlow id="Flow_D" sourceRef="Gw_Combinado" targetRef="Task_D"/>
+    <bpmn:sequenceFlow id="Flow_End1" sourceRef="Task_C" targetRef="End_1"/>
+    <bpmn:sequenceFlow id="Flow_End2" sourceRef="Task_D" targetRef="End_2"/>
+  </bpmn:process>
+</bpmn:definitions>"""
+        ok, err = validate_bpmn_xml(xml)
+        assert ok is False
+        assert "Gw_Combinado" in err
+        assert "junção" in err or "juntar" in err
+
+    def test_gateway_with_multiple_incoming_and_single_outgoing_is_valid(self):
+        """Gateway de junção (join) puro — várias entradas, uma única saída
+        — continua válido, não é o padrão problemático."""
+        xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Def_1">
+  <bpmn:process id="Process_1" isExecutable="false">
+    <bpmn:startEvent id="Start_1">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:parallelGateway id="Gateway_Split" name="">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_A</bpmn:outgoing>
+      <bpmn:outgoing>Flow_B</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:task id="Task_A" name="Tarefa A">
+      <bpmn:incoming>Flow_A</bpmn:incoming>
+      <bpmn:outgoing>Flow_JoinA</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_B" name="Tarefa B">
+      <bpmn:incoming>Flow_B</bpmn:incoming>
+      <bpmn:outgoing>Flow_JoinB</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:parallelGateway id="Gateway_Join" name="">
+      <bpmn:incoming>Flow_JoinA</bpmn:incoming>
+      <bpmn:incoming>Flow_JoinB</bpmn:incoming>
+      <bpmn:outgoing>Flow_End</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:endEvent id="End_1">
+      <bpmn:incoming>Flow_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="Gateway_Split"/>
+    <bpmn:sequenceFlow id="Flow_A" sourceRef="Gateway_Split" targetRef="Task_A"/>
+    <bpmn:sequenceFlow id="Flow_B" sourceRef="Gateway_Split" targetRef="Task_B"/>
+    <bpmn:sequenceFlow id="Flow_JoinA" sourceRef="Task_A" targetRef="Gateway_Join"/>
+    <bpmn:sequenceFlow id="Flow_JoinB" sourceRef="Task_B" targetRef="Gateway_Join"/>
+    <bpmn:sequenceFlow id="Flow_End" sourceRef="Gateway_Join" targetRef="End_1"/>
+  </bpmn:process>
+</bpmn:definitions>"""
+        ok, err = validate_bpmn_xml(xml)
+        assert ok is True, err

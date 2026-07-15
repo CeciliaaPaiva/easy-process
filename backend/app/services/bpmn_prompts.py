@@ -17,6 +17,14 @@ mesmos elementos genéricos:
    Todo gateway de divisão (split) com mais de uma saída condicional deve ter
    um gateway de junção (join) correspondente do MESMO tipo mais adiante,
    salvo quando um dos caminhos termina em endEvent.
+   NUNCA combine junção e divisão na MESMA forma de gateway (mais de uma
+   entrada E mais de uma saída ao mesmo tempo) — isso é ambíguo e quebra
+   ferramentas de simulação: se as entradas vêm de ramos mutuamente
+   exclusivos (ex: um "Sim"/"Não" anterior), a segunda nunca chega e o
+   gateway trava esperando por ela para sempre. Sempre que um fluxo precisar
+   juntar ramos alternativos e DEPOIS abrir em paralelo, use DOIS gateways
+   separados em sequência: um de junção (só entradas, uma única saída) e
+   logo em seguida um de divisão (uma única entrada, as saídas).
 
 2. TIPOS DE ATIVIDADE — escolha pelo modo de execução descrito na
    transcrição/instrução, nunca use apenas bpmn:task genérico quando o modo

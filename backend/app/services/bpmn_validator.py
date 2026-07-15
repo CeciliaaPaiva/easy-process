@@ -41,7 +41,44 @@ def validate_bpmn_xml(xml: str) -> tuple[bool, str]:
     if overlap_error:
         return False, overlap_error
 
+    combined_gateway_error = _find_combined_gateway(root)
+    if combined_gateway_error:
+        return False, combined_gateway_error
+
     return True, ""
+
+
+_GATEWAY_TAGS = {
+    "exclusivegateway",
+    "parallelgateway",
+    "inclusivegateway",
+    "complexgateway",
+    "eventbasedgateway",
+}
+
+
+def _find_combined_gateway(root: etree._Element) -> str:
+    """Um gateway não deve acumular papel de junção (merge de ramos
+    alternativos) e divisão (fork) na mesma forma. Isso é ambíguo em BPMN e
+    quebra ferramentas de simulação/animação: se as entradas vêm de ramos
+    mutuamente exclusivos, a segunda nunca chega, e o gateway trava esperando
+    por ela para sempre em vez de abrir os ramos de saída."""
+    for element in root.iter():
+        tag = element.tag.split("}")[-1].lower()
+        if tag not in _GATEWAY_TAGS:
+            continue
+        incoming = sum(1 for c in element if c.tag.split("}")[-1] == "incoming")
+        outgoing = sum(1 for c in element if c.tag.split("}")[-1] == "outgoing")
+        if incoming > 1 and outgoing > 1:
+            return (
+                f"O gateway '{element.get('id', '?')}' tem {incoming} entradas e "
+                f"{outgoing} saídas ao mesmo tempo — um gateway não pode juntar "
+                "ramos (merge) e abrir em paralelo/condicional (split) na mesma "
+                "forma. Separe em dois gateways do mesmo tipo: um de junção "
+                "(join, só com as entradas e uma única saída) seguido por um de "
+                "divisão (split, uma única entrada e as saídas)."
+            )
+    return ""
 
 
 def _find_shape_overlap(root: etree._Element) -> str:
