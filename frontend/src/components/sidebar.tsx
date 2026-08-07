@@ -3,14 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import {
-  BarChart3,
-  ChevronLeft,
-  ChevronRight,
-  FolderOpen,
-  LogOut,
-  Settings,
-} from 'lucide-react'
+import { BarChart3, ChevronLeft, ChevronRight, FolderOpen, LogOut, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { clearTokens } from '@/lib/auth'
 import { api } from '@/lib/api'
@@ -20,9 +13,7 @@ const navItems = [
   { href: '/settings', label: 'Configurações', icon: Settings },
 ]
 
-const adminNavItems = [
-  { href: '/admin/usage', label: 'Uso de IA', icon: BarChart3 },
-]
+const adminNavItems = [{ href: '/admin/usage', label: 'Uso de IA', icon: BarChart3 }]
 
 const STORAGE_KEY = 'easy-process:sidebar-collapsed'
 
@@ -32,13 +23,13 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(() =>
     typeof window === 'undefined' ? false : localStorage.getItem(STORAGE_KEY) === 'true'
   )
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false)
 
   useEffect(() => {
     api.auth
       .me()
-      .then((user) => setIsAdmin(user.role === 'admin'))
-      .catch(() => setIsAdmin(false))
+      .then((user) => setIsPlatformAdmin(user.is_platform_admin))
+      .catch(() => setIsPlatformAdmin(false))
   }, [])
 
   function toggleCollapsed() {
@@ -78,22 +69,24 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {[...navItems, ...(isAdmin ? adminNavItems : [])].map(({ href, label, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            title={collapsed ? label : undefined}
-            className={cn(
-              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-              pathname.startsWith(href)
-                ? 'bg-blue-50 text-blue-700'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-            )}
-          >
-            <Icon className="h-4 w-4 flex-shrink-0" />
-            {!collapsed && <span>{label}</span>}
-          </Link>
-        ))}
+        {[...navItems, ...(isPlatformAdmin ? adminNavItems : [])].map(
+          ({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              title={collapsed ? label : undefined}
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                pathname.startsWith(href)
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              )}
+            >
+              <Icon className="h-4 w-4 flex-shrink-0" />
+              {!collapsed && <span>{label}</span>}
+            </Link>
+          )
+        )}
       </nav>
 
       {/* Footer */}

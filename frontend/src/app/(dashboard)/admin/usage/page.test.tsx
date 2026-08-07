@@ -27,6 +27,7 @@ describe('AdminUsagePage', () => {
       email: 'a@a.com',
       role: 'analyst',
       tenant_id: 't1',
+      is_platform_admin: false,
       created_at: '2026-01-01',
     })
 
@@ -36,13 +37,33 @@ describe('AdminUsagePage', () => {
     expect(mockedApi.admin.usage).not.toHaveBeenCalled()
   })
 
-  it('renders totals and stage breakdown for admins', async () => {
+  it('shows a permission message for tenant admins without platform access', async () => {
+    // role="admin" só dá acesso a gerenciar o próprio tenant — o painel de
+    // uso agregado da plataforma exige is_platform_admin (S11-01).
+    mockedApi.auth.me.mockResolvedValue({
+      id: '1',
+      name: 'Admin do tenant',
+      email: 'tenant-admin@a.com',
+      role: 'admin',
+      tenant_id: 't1',
+      is_platform_admin: false,
+      created_at: '2026-01-01',
+    })
+
+    render(<AdminUsagePage />)
+
+    expect(await screen.findByText(/apenas administradores/i)).toBeInTheDocument()
+    expect(mockedApi.admin.usage).not.toHaveBeenCalled()
+  })
+
+  it('renders totals and stage breakdown for platform admins', async () => {
     mockedApi.auth.me.mockResolvedValue({
       id: '1',
       name: 'Admin',
       email: 'admin@a.com',
       role: 'admin',
       tenant_id: 't1',
+      is_platform_admin: true,
       created_at: '2026-01-01',
     })
     mockedApi.admin.usage.mockResolvedValue({

@@ -24,6 +24,10 @@ function formatTokens(n: number): string {
   return n.toLocaleString('pt-BR')
 }
 
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR')
+}
+
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <Card>
@@ -48,7 +52,7 @@ export default function AdminUsagePage() {
       .me()
       .then((user) => {
         if (cancelled) return
-        if (user.role !== 'admin') {
+        if (!user.is_platform_admin) {
           setForbidden(true)
           setLoading(false)
           return
@@ -228,9 +232,7 @@ export default function AdminUsagePage() {
                   )}
                   {usage.recent_logs.map((log) => (
                     <tr key={log.id} className="border-b border-gray-100 last:border-0">
-                      <td className="py-2 text-gray-500">
-                        {new Date(log.created_at).toLocaleString('pt-BR')}
-                      </td>
+                      <td className="py-2 text-gray-500">{formatDateTime(log.created_at)}</td>
                       <td className="py-2">{stageLabels[log.stage] ?? log.stage}</td>
                       <td className="py-2 text-gray-500">{log.model}</td>
                       <td className="py-2">

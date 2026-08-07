@@ -4,6 +4,7 @@ export interface User {
   email: string
   role: 'admin' | 'analyst' | 'viewer'
   tenant_id: string
+  is_platform_admin: boolean
   created_at: string
 }
 

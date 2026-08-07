@@ -3,7 +3,17 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { ChevronLeft, Download, History, Loader2, AlertTriangle, RefreshCw } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronDown,
+  Download,
+  History,
+  Loader2,
+  AlertTriangle,
+  RefreshCw,
+  PanelRight,
+  X,
+} from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import type { Process, ProcessVersion } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -13,9 +23,10 @@ import { DocsPanel } from '@/components/bpmn/DocsPanel'
 import { TranscriptionPanel } from '@/components/bpmn/TranscriptionPanel'
 import { BottleneckPanel } from '@/components/bpmn/BottleneckPanel'
 import { BpmnToolbar, type PresentationSpeed } from '@/components/bpmn/BpmnToolbar'
-import type { PresentationStatus } from '@/components/bpmn/BpmnViewer'
+import type { BpmnViewerHandle, PresentationStatus } from '@/components/bpmn/BpmnViewer'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/ui/dialog'
+import { exportBpmnAsPdf, exportBpmnAsPng } from '@/lib/bpmnExport'
 
 // bpmn-js is browser-only
 const BpmnViewer = dynamic(() => import('@/components/bpmn/BpmnViewer').then((m) => m.BpmnViewer), {
@@ -144,7 +155,11 @@ export default function ProcessPage() {
   const [highlightIds, setHighlightIds] = useState<string[]>([])
   const [presentationStatus, setPresentationStatus] = useState<PresentationStatus>('stopped')
   const [presentationSpeed, setPresentationSpeed] = useState<PresentationSpeed>(1)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const bpmnViewerRef = useRef<BpmnViewerHandle>(null)
 
   const loadProcess = useCallback(async () => {
     try {
@@ -197,6 +212,33 @@ export default function ProcessPage() {
     setPresentationStatus('stopped')
   }, [])
 
+  const handleExport = useCallback(
+    async (format: 'bpmn' | 'png' | 'pdf') => {
+      setExportMenuOpen(false)
+      setExporting(true)
+      setError('')
+      try {
+        if (format === 'bpmn') {
+          await api.processes.export(processId)
+          return
+        }
+        const svg = await bpmnViewerRef.current?.exportSvg()
+        if (!svg) throw new Error('Diagrama ainda não está pronto para exportar')
+        const filename = `${proc?.name ?? 'processo'}.${format}`
+        if (format === 'png') {
+          await exportBpmnAsPng(svg, filename)
+        } else {
+          await exportBpmnAsPdf(svg, filename)
+        }
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Erro ao exportar diagrama')
+      } finally {
+        setExporting(false)
+      }
+    },
+    [processId, proc?.name]
+  )
+
   if (loading) {
     return (
       <div className="flex h-full flex-col gap-4">
@@ -221,17 +263,18 @@ export default function ProcessPage() {
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col gap-0 -m-8">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-y-2 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <button
             onClick={() => router.push(`/projects/${projectId}`)}
             className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+            title="Voltar ao projeto"
           >
             <ChevronLeft size={16} />
-            Projeto
+            <span className="hidden md:inline">Projeto</span>
           </button>
-          <span className="text-gray-300">/</span>
-          <span className="max-w-[200px] truncate text-sm font-medium text-gray-900">
+          <span className="hidden text-gray-300 md:inline">/</span>
+          <span className="max-w-[120px] truncate text-sm font-medium text-gray-900 sm:max-w-[200px]">
             {proc.name}
           </span>
           <StatusBadge status={proc.status} />
@@ -242,23 +285,60 @@ export default function ProcessPage() {
             <>
               <Button
                 variant="ghost"
+                className="gap-1 text-xs lg:hidden"
+                onClick={() => setRightPanelOpen(true)}
+              >
+                <PanelRight size={14} />
+                Painel
+              </Button>
+              <Button
+                variant="ghost"
                 className="gap-1 text-xs"
                 onClick={() => setShowVersions(true)}
               >
                 <History size={14} />
                 Versões
               </Button>
-              <button
-                onClick={() =>
-                  api.processes.export(processId).catch((err) => {
-                    setError(err instanceof ApiError ? err.message : 'Erro ao exportar BPMN')
-                  })
-                }
-                className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100"
-              >
-                <Download size={14} />
-                Exportar
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setExportMenuOpen((v) => !v)}
+                  disabled={exporting}
+                  className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  {exporting ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                  Exportar
+                  <ChevronDown size={12} />
+                </button>
+                {exportMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setExportMenuOpen(false)} />
+                    <div className="absolute right-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-md">
+                      <button
+                        onClick={() => handleExport('bpmn')}
+                        className="block w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100"
+                      >
+                        .bpmn (XML)
+                      </button>
+                      <button
+                        onClick={() => handleExport('png')}
+                        className="block w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100"
+                      >
+                        PNG
+                      </button>
+                      <button
+                        onClick={() => handleExport('pdf')}
+                        className="block w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100"
+                      >
+                        PDF
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -292,6 +372,7 @@ export default function ProcessPage() {
           {isReady && bpmnXml && (
             <div className="relative h-full w-full">
               <BpmnViewer
+                viewerRef={bpmnViewerRef}
                 xml={bpmnXml}
                 className="h-full w-full"
                 highlightIds={highlightIds}
@@ -312,40 +393,61 @@ export default function ProcessPage() {
           )}
         </div>
 
-        {/* Right Panel: Chat + Docs tabs */}
+        {/* Right Panel: Chat + Docs tabs — drawer em telas <lg, painel fixo em lg+ */}
         {isReady && (
-          <div className="flex w-80 shrink-0 flex-col border-l border-gray-200 bg-white">
-            <div className="flex border-b border-gray-200">
-              {RIGHT_TABS.map(({ key, label }) => (
+          <>
+            {rightPanelOpen && (
+              <div
+                className="fixed inset-0 z-20 bg-black/30 lg:hidden"
+                onClick={() => setRightPanelOpen(false)}
+              />
+            )}
+            <div
+              className={`fixed inset-y-0 right-0 z-30 flex w-80 max-w-[85vw] flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 ease-in-out lg:static lg:z-auto lg:w-80 lg:max-w-none lg:shrink-0 lg:translate-x-0 lg:shadow-none xl:w-96 ${
+                rightPanelOpen ? 'translate-x-0' : 'translate-x-full'
+              }`}
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2 lg:hidden">
+                <span className="text-xs font-semibold text-gray-500">Painel</span>
                 <button
-                  key={key}
-                  onClick={() => {
-                    setRightTab(key)
-                    setHighlightIds([])
-                  }}
-                  className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                    rightTab === key
-                      ? 'border-b-2 border-blue-600 text-blue-600'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
+                  onClick={() => setRightPanelOpen(false)}
+                  className="p-1 text-gray-400 hover:text-gray-600"
                 >
-                  {label}
+                  <X size={16} />
                 </button>
-              ))}
+              </div>
+              <div className="flex border-b border-gray-200">
+                {RIGHT_TABS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setRightTab(key)
+                      setHighlightIds([])
+                    }}
+                    className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                      rightTab === key
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+                {rightTab === 'chat' && (
+                  <ChatWindow processId={processId} onBpmnUpdate={handleBpmnUpdate} />
+                )}
+                {rightTab === 'docs' && <DocsPanel processId={processId} />}
+                {rightTab === 'bottlenecks' && (
+                  <BottleneckPanel processId={processId} onHighlight={setHighlightIds} />
+                )}
+                {rightTab === 'transcription' && (
+                  <TranscriptionPanel transcription={proc.transcription} />
+                )}
+              </div>
             </div>
-            <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-              {rightTab === 'chat' && (
-                <ChatWindow processId={processId} onBpmnUpdate={handleBpmnUpdate} />
-              )}
-              {rightTab === 'docs' && <DocsPanel processId={processId} />}
-              {rightTab === 'bottlenecks' && (
-                <BottleneckPanel processId={processId} onHighlight={setHighlightIds} />
-              )}
-              {rightTab === 'transcription' && (
-                <TranscriptionPanel transcription={proc.transcription} />
-              )}
-            </div>
-          </div>
+          </>
         )}
       </div>
 

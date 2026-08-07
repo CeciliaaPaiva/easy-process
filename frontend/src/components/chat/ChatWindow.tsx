@@ -7,6 +7,7 @@ import { api, ApiError } from '@/lib/api'
 import type { ChatMessage } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 
 interface Props {
   processId: string
@@ -20,6 +21,14 @@ export function ChatWindow({ processId, onBpmnUpdate }: Props) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }, [input])
 
   useEffect(() => {
     api.chat
@@ -83,16 +92,15 @@ export function ChatWindow({ processId, onBpmnUpdate }: Props) {
           <div className="flex h-full flex-col items-center justify-center gap-2 py-8 text-center text-sm text-gray-400">
             <Bot size={32} className="text-gray-200" />
             <p>Envie uma instrução para refinar o diagrama</p>
-            <p className="text-xs">Ex: &quot;Adicione um gateway de aprovação após a tarefa 2&quot;</p>
+            <p className="text-xs">
+              Ex: &quot;Adicione um gateway de aprovação após a tarefa 2&quot;
+            </p>
           </div>
         ) : (
           messages.map((m) => (
             <div
               key={m.id}
-              className={clsx(
-                'flex gap-2',
-                m.role === 'user' ? 'flex-row-reverse' : 'flex-row'
-              )}
+              className={clsx('flex gap-2', m.role === 'user' ? 'flex-row-reverse' : 'flex-row')}
             >
               <div
                 className={clsx(
@@ -118,19 +126,26 @@ export function ChatWindow({ processId, onBpmnUpdate }: Props) {
         <div ref={bottomRef} />
       </div>
 
-      {error && (
-        <p className="px-4 pb-2 text-xs text-red-600">{error}</p>
-      )}
+      {error && <p className="px-4 pb-2 text-xs text-red-600">{error}</p>}
 
-      <form onSubmit={send} className="border-t border-gray-200 p-3 flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ex: Adicione um gateway de aprovação..."
-          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          disabled={sending}
-        />
+      <form onSubmit={send} className="border-t border-gray-200 p-3 flex gap-2 items-end">
+        <div className="flex-1">
+          <Textarea
+            ref={textareaRef}
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                e.currentTarget.form?.requestSubmit()
+              }
+            }}
+            placeholder="Ex: Adicione um gateway de aprovação... (Shift+Enter para quebrar linha)"
+            className="resize-none overflow-y-auto"
+            disabled={sending}
+          />
+        </div>
         <Button
           type="submit"
           disabled={!input.trim() || sending}

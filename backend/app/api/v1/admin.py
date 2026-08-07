@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -19,10 +19,10 @@ router = APIRouter(tags=["admin"])
 
 
 def _require_admin(user: User) -> None:
-    if user.role != "admin":
+    if not user.is_platform_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas administradores podem acessar dados de uso da plataforma",
+            detail="Apenas administradores da plataforma podem acessar dados de uso",
         )
 
 
@@ -36,7 +36,7 @@ async def get_usage_summary(
     filtrado pelo tenant do usuário logado (isolamento multi-tenant)."""
     _require_admin(current_user)
 
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
     tenant_filter = LlmUsageLog.tenant_id == current_user.tenant_id
     period_filter = LlmUsageLog.created_at >= since
 

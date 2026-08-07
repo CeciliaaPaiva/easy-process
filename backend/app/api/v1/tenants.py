@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
@@ -9,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.core.security import hash_password
-from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.auth import UserResponse
 
@@ -85,7 +83,6 @@ async def invite_member(
         role=data.role,
         password_hash=hash_password(temp_password),
         is_active=True,
-        created_at=datetime.utcnow(),
     )
     db.add(new_user)
     await db.commit()

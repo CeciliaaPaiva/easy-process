@@ -1,6 +1,6 @@
 # Plano Sprint 11 — Correções de UX e acesso (fundação)
 
-**Status:** Planejada, não iniciada
+**Status:** Concluída — ver `docs/releases/RELEASE-S11.md`
 
 ## Contexto
 

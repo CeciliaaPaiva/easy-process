@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -7,6 +7,15 @@ from sqlalchemy import select
 from app.models.llm_usage_log import LlmUsageLog
 from app.models.user import User
 from tests.integration.conftest import register_user
+
+
+async def _grant_platform_admin(db_session, user_id: uuid.UUID) -> None:
+    user = (
+        await db_session.execute(select(User).where(User.id == user_id))
+    ).scalar_one()
+    user.is_platform_admin = True
+    db_session.add(user)
+    await db_session.commit()
 
 
 async def _seed_usage(db_session, tenant_id: uuid.UUID, **overrides) -> LlmUsageLog:
@@ -51,9 +60,21 @@ class TestGetUsageSummary:
         resp = await client.get("/api/v1/admin/usage", headers=auth["headers"])
         assert resp.status_code == 403
 
+    async def test_tenant_admin_without_platform_admin_gets_403(self, client):
+        # register_user sempre cria o usuário com role="admin" no seu
+        # próprio tenant — isso não deve dar acesso ao painel de uso
+        # agregado da plataforma (S11-01: exposição de dado sensível).
+        auth = await register_user(client)
+        assert auth["user"]["role"] == "admin"
+        assert auth["user"]["is_platform_admin"] is False
+
+        resp = await client.get("/api/v1/admin/usage", headers=auth["headers"])
+        assert resp.status_code == 403
+
     async def test_admin_sees_totals_and_breakdown(self, client, db_session):
         auth = await register_user(client)
         tenant_id = uuid.UUID(auth["user"]["tenant_id"])
+        await _grant_platform_admin(db_session, uuid.UUID(auth["user"]["id"]))
 
         await _seed_usage(
             db_session,
@@ -97,6 +118,7 @@ class TestGetUsageSummary:
         auth_a = await register_user(client)
         auth_b = await register_user(client)
         tenant_a = uuid.UUID(auth_a["user"]["tenant_id"])
+        await _grant_platform_admin(db_session, uuid.UUID(auth_b["user"]["id"]))
 
         await _seed_usage(db_session, tenant_a)
 
@@ -107,9 +129,10 @@ class TestGetUsageSummary:
     async def test_days_filter_excludes_older_logs(self, client, db_session):
         auth = await register_user(client)
         tenant_id = uuid.UUID(auth["user"]["tenant_id"])
+        await _grant_platform_admin(db_session, uuid.UUID(auth["user"]["id"]))
 
         old_log = await _seed_usage(db_session, tenant_id)
-        old_log.created_at = datetime.utcnow() - timedelta(days=60)
+        old_log.created_at = datetime.now(UTC) - timedelta(days=60)
         db_session.add(old_log)
         await db_session.commit()
 

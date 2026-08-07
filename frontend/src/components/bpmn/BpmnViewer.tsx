@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useRef } from 'react'
+import { Minus, Plus, Maximize } from 'lucide-react'
 
 import 'bpmn-js/dist/assets/diagram-js.css'
 import 'bpmn-js/dist/assets/bpmn-js.css'
@@ -28,10 +29,17 @@ const IDLE_TICKS_TO_LOOP = 2
 const SAFETY_IDLE_TICKS_TO_FORCE_LOOP = 20
 
 interface BpmnCanvas {
-  zoom: (fit: string, center: boolean) => void
+  zoom: {
+    (): number
+    (fitOrScale: string | number, center?: boolean): void
+  }
   addMarker: (elementId: string, cls: string) => void
   removeMarker: (elementId: string, cls: string) => void
 }
+
+const ZOOM_STEP = 0.1
+const ZOOM_MIN = 0.2
+const ZOOM_MAX = 4
 
 interface SimulatorElement {
   id: string
@@ -64,6 +72,7 @@ interface ElementRegistry {
 
 interface BpmnServices {
   get: (name: string) => unknown
+  saveSVG: () => Promise<{ svg: string }>
 }
 
 const EXCLUSIVE_GATEWAY_TYPE = 'bpmn:ExclusiveGateway'
@@ -82,16 +91,24 @@ export interface PresentationState {
   speed: number
 }
 
+export interface BpmnViewerHandle {
+  exportSvg: () => Promise<string>
+}
+
 interface Props {
   xml: string
   className?: string
   highlightIds?: string[]
   presentation?: PresentationState
+  // next/dynamic() não repassa a prop especial `ref` para componentes
+  // carregados dinamicamente (LoadableComponent não usa forwardRef) — por
+  // isso a imperative handle é exposta via prop normal, não via ref.
+  viewerRef?: React.Ref<BpmnViewerHandle>
 }
 
-export function BpmnViewer({ xml, className, highlightIds, presentation }: Props) {
+export function BpmnViewer({ xml, className, highlightIds, presentation, viewerRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const viewerRef = useRef<BpmnServices | null>(null)
+  const servicesRef = useRef<BpmnServices | null>(null)
   const highlightedRef = useRef<string[]>([])
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const rotationRef = useRef<Map<string, number>>(new Map())
@@ -111,7 +128,7 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
   const reachedEndRef = useRef(false)
 
   const tick = useCallback(() => {
-    const services = viewerRef.current
+    const services = servicesRef.current
     if (!services) return
     const simulator = services.get('simulator') as Simulator
 
@@ -177,8 +194,8 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
     awaitingKickRef.current = true
     reachedEndRef.current = false
 
-    if (presentationActiveRef.current && viewerRef.current) {
-      const services = viewerRef.current
+    if (presentationActiveRef.current && servicesRef.current) {
+      const services = servicesRef.current
       ;(services.get('simulator') as Simulator).reset()
       ;(services.get('toggleMode') as ToggleMode).toggleMode(false)
     }
@@ -187,7 +204,7 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
 
   const startPresentation = useCallback(
     (speed: number) => {
-      const services = viewerRef.current
+      const services = servicesRef.current
       if (!services) return
 
       const isFreshStart = !presentationActiveRef.current
@@ -215,21 +232,21 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
     async function init() {
       // Dynamic import because bpmn-js / token-simulation are browser-only
       const [{ default: BpmnJS }, { default: TokenSimulationModule }] = await Promise.all([
-        import('bpmn-js'),
+        import('bpmn-js/lib/NavigatedViewer'),
         import('bpmn-js-token-simulation/lib/viewer'),
       ])
       if (!mounted || !containerRef.current) return
 
-      if (viewerRef.current) {
+      if (servicesRef.current) {
         stopPresentation()
-        ;(viewerRef.current as unknown as { destroy: () => void }).destroy()
+        ;(servicesRef.current as unknown as { destroy: () => void }).destroy()
       }
 
       const viewer = new BpmnJS({
         container: containerRef.current,
         additionalModules: [TokenSimulationModule],
       })
-      viewerRef.current = viewer as unknown as BpmnServices
+      servicesRef.current = viewer as unknown as BpmnServices
       highlightedRef.current = []
       visitedGatewaysRef.current.clear()
       reachedEndRef.current = false
@@ -270,16 +287,16 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
     return () => {
       mounted = false
       stopPresentation()
-      if (viewerRef.current) {
-        ;(viewerRef.current as unknown as { destroy: () => void }).destroy()
-        viewerRef.current = null
+      if (servicesRef.current) {
+        ;(servicesRef.current as unknown as { destroy: () => void }).destroy()
+        servicesRef.current = null
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [xml])
 
   useEffect(() => {
-    const viewer = viewerRef.current as { get: (name: string) => unknown } | null
+    const viewer = servicesRef.current as { get: (name: string) => unknown } | null
     if (!viewer) return
     const canvas = viewer.get('canvas') as BpmnCanvas
     for (const id of highlightedRef.current) {
@@ -297,7 +314,7 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
   }, [highlightIds])
 
   useEffect(() => {
-    if (!viewerRef.current) return
+    if (!servicesRef.current) return
     if (presentation?.status === 'playing') {
       startPresentation(presentation.speed || 1)
     } else if (presentation?.status === 'paused') {
@@ -313,5 +330,65 @@ export function BpmnViewer({ xml, className, highlightIds, presentation }: Props
     stopPresentation,
   ])
 
-  return <div ref={containerRef} className={className ?? 'h-full w-full'} />
+  const zoomBy = useCallback((delta: number) => {
+    const services = servicesRef.current
+    if (!services) return
+    const canvas = services.get('canvas') as BpmnCanvas
+    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, canvas.zoom() + delta))
+    canvas.zoom(next)
+  }, [])
+
+  const zoomToFit = useCallback(() => {
+    const services = servicesRef.current
+    if (!services) return
+    const canvas = services.get('canvas') as BpmnCanvas
+    canvas.zoom('fit-viewport', true)
+  }, [])
+
+  useImperativeHandle(
+    viewerRef,
+    () => ({
+      exportSvg: async () => {
+        const services = servicesRef.current
+        if (!services) throw new Error('Diagrama ainda não carregado')
+        const { svg } = await services.saveSVG()
+        return svg
+      },
+    }),
+    []
+  )
+
+  return (
+    <div className={`relative ${className ?? 'h-full w-full'}`}>
+      <div ref={containerRef} className="h-full w-full" />
+      {/* canto inferior esquerdo — o direito é ocupado pelo selo "powered by
+      bpmn.io" que o bpmn-js sempre renderiza (exigido pela licença da lib) */}
+      <div className="absolute bottom-4 left-4 z-10 flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => zoomBy(ZOOM_STEP)}
+          title="Aumentar zoom"
+          className="flex h-8 w-8 items-center justify-center text-gray-600 hover:bg-gray-100"
+        >
+          <Plus size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomBy(-ZOOM_STEP)}
+          title="Diminuir zoom"
+          className="flex h-8 w-8 items-center justify-center border-t border-gray-200 text-gray-600 hover:bg-gray-100"
+        >
+          <Minus size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={zoomToFit}
+          title="Ajustar à tela"
+          className="flex h-8 w-8 items-center justify-center border-t border-gray-200 text-gray-600 hover:bg-gray-100"
+        >
+          <Maximize size={16} />
+        </button>
+      </div>
+    </div>
+  )
 }

@@ -29,6 +29,7 @@ class UserResponse(BaseModel):
     role: str
     tenant_id: uuid.UUID
     is_active: bool
+    is_platform_admin: bool
     created_at: datetime
 
 
