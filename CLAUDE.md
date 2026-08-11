@@ -7,7 +7,7 @@
 
 ## Visão geral do produto
 
-**Easy Process** é uma plataforma SaaS B2B que transforma entrevistas em áudio em diagramas BPMN completos usando IA. O fluxo principal é: upload de áudio → transcrição (Whisper) → geração de BPMN (Claude API) → refinamento via chat.
+**Easy Process** é uma plataforma SaaS B2B que transforma entrevistas em áudio em diagramas BPMN completos usando IA. O fluxo principal é: upload de áudio → transcrição (Gemini) → geração de BPMN (Gemini) → refinamento via chat.
 
 **Público-alvo:** Analistas de negócio que precisam acelerar a fase de modelagem de processos.
 
@@ -26,8 +26,8 @@
 | Frontend | Next.js (App Router) + TypeScript | 14+ |
 | Visualizador BPMN | bpmn-js (Camunda open-source) | latest |
 | Backend / API | FastAPI | Python 3.11+ |
-| Transcrição | OpenAI Whisper (local, modelo `base`) | - |
-| Geração BPMN | Claude API (Anthropic) | claude-sonnet-4-6 |
+| Transcrição | Google Gemini API (`GEMINI_MODEL_TRANSCRIPTION`) | - |
+| Geração BPMN | Google Gemini API (`GEMINI_MODEL_GENERATION`) | gemini-3.1-flash-lite |
 | Banco de dados | PostgreSQL | 16 |
 | ORM | SQLAlchemy (async) + Alembic | - |
 | Armazenamento | Filesystem local (→ S3 no futuro) | - |
@@ -257,12 +257,14 @@ DELETE /api/v1/tenants/members/:id    → Remover membro
    → Dispara BackgroundTask
 
 2. TRANSCRIÇÃO  (status = "transcribing")
-   → Whisper local processa o áudio (modelo "base", language="pt")
-   → Salva texto + segmentos com timestamps
+   → Áudio enviado à Gemini API (`GEMINI_MODEL_TRANSCRIPTION`), language="pt"
+   → Salva texto + duração
 
 3. GERAÇÃO BPMN  (status = "generating")
-   → Prompt especializado enviado ao Claude API
-   → Claude retorna JSON: { bpmn_xml, summary, actors, tasks }
+   → Prompt especializado enviado à Gemini API (`GEMINI_MODEL_GENERATION`) — uma
+     única chamada faz análise semântica e modelagem BPMN ao mesmo tempo (ver
+     `docs/sprints/SPRINT-12-plano.md` para a proposta de separar as duas)
+   → Gemini retorna JSON: { bpmn_xml, summary, actors, tasks }
    → Valida XML com lxml
    → Se inválido: retry com prompt corretivo (até 3x)
    → Salva BPMN + metadados + cria version 1
@@ -274,10 +276,14 @@ DELETE /api/v1/tenants/members/:id    → Remover membro
 
 5. REFINAMENTO (loop)
    → Usuário envia instrução em linguagem natural
-   → Backend: BPMN atual + histórico + instrução → Claude
-   → Claude retorna BPMN atualizado + descrição da mudança
+   → Backend: BPMN atual + histórico + instrução → Gemini (`GEMINI_MODEL_REFINEMENT`)
+   → Gemini retorna BPMN atualizado + descrição da mudança
    → Salva nova versão; frontend atualiza viewer em tempo real
 ```
+
+Cada chamada de IA é instrumentada em `app/services/llm_usage.py` (tokens reais de
+`usage_metadata` + custo estimado por tabela de preços) e persistida em
+`LlmUsageLog`, visível no painel "Uso de IA" (restrito a platform admin desde a S11).
 
 ---
 
@@ -333,7 +339,7 @@ Retorna JSON com:
 | Backend unitário | pytest + pytest-asyncio |
 | Backend integração | pytest + httpx.AsyncClient |
 | Backend fixtures | factory-boy |
-| Backend mock | pytest-mock (mockar Whisper e Claude API) |
+| Backend mock | pytest-mock (mockar a Gemini API) |
 | Backend cobertura | pytest-cov + Codecov |
 | Frontend unitário | Vitest + React Testing Library |
 | Frontend E2E | Playwright |
@@ -341,7 +347,7 @@ Retorna JSON com:
 | CI | GitHub Actions |
 
 ### Regra de ouro para mocks
-- **Whisper e Claude API sempre mockados** nos testes automatizados — nunca gastar créditos em CI
+- **Gemini API sempre mockada** nos testes automatizados — nunca gastar créditos em CI
 - Testes com API real são manuais e documentados separadamente
 - Isolamento multi-tenant tem suite dedicada (`test_tenant_isolation.py`) — é crítico e não pode ser omitido
 
@@ -372,9 +378,9 @@ Retorna JSON com:
 | Risco | Mitigação |
 |-------|-----------|
 | BPMN com XML inválido | Loop de validação + retry corretivo (até 3x) |
-| Whisper lento em CPU | Limitar áudio a 60min; modelo `base`; processamento em background |
-| Claude API indisponível | Retry com backoff exponencial; notificar usuário |
-| Qualidade de transcrição pt-BR ruim | Permitir edição da transcrição antes de gerar BPMN; upgrade para modelo `small` |
+| Gemini API indisponível/lenta | Retry com backoff exponencial; notificar usuário |
+| Qualidade de transcrição pt-BR ruim | Permitir edição da transcrição antes de gerar BPMN |
+| Preço por token do Gemini mudar sem aviso | Tabela de preços em `llm_usage.py` é hardcoded e não vem de API — revisar manualmente quando o Gemini mudar tabela (painel "Uso de IA" fica incoerente até isso ser atualizado) |
 | Vazamento de dados entre tenants | Testes de isolamento automatizados; middleware que impede bypass |
 
 ---
@@ -428,7 +434,7 @@ Descrição breve do que foi entregue nesta sprint.
 
 | Decisão | Escolha | Justificativa |
 |---------|---------|--------------|
-| Transcrição | Whisper local (`base`) | Zero custo; roda em CPU; qualidade razoável em pt-BR |
+| Transcrição, geração e refinamento | Google Gemini API, um modelo configurável por etapa (`GEMINI_MODEL_TRANSCRIPTION`/`_GENERATION`/`_REFINEMENT`) | Decisão consciente de manter Gemini (não Claude/Whisper, como versões antigas deste documento diziam) — ver `docs/releases/RELEASE-S9.md`. Modelos "lite" mais baratos custam pouco mas modelam BPMN semanticamente pobre; ajustado para `gemini-3.1-flash-lite` em geração/refino |
 | Visualizador BPMN | bpmn-js | Mesma lib do Camunda Modeler; open-source; compatibilidade garantida |
 | Multi-tenancy | Shared schema + `tenant_id` | Simples para MVP; toda query filtrada via middleware |
 | Backend | FastAPI | Async nativo; tipagem forte com Pydantic; integração natural com IA |

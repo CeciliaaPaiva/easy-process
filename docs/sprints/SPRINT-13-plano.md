@@ -1,66 +1,40 @@
-# Plano Sprint 13 — Fluxograma para não-técnicos + brainstorm de personas
+# Plano Sprint 13 — Edição manual do diagrama
 
-**Status:** Planejada, não iniciada (depende da conclusão da Sprint 12)
+**Status:** Planejada, não iniciada (depende da conclusão da Sprint 12) — **viabilidade ainda a discutir no kickoff, escopo abaixo é ponto de partida, não compromisso fechado**
 
 ## Contexto
 
-A stakeholder identificou 3 personas de usuário e pediu um brainstorm de como entregar valor pras 3, com destaque para um "fluxograma" (alternativa ao BPMN técnico) e um possível dashboard para líderes não-técnicos.
+Promovido de item único (S12-04 no plano anterior) para sprint própria, por decisão da stakeholder — o volume de decisões de design e o risco técnico do item justificam discussão isolada, sem competir por atenção com o resto do backlog de qualidade de modelagem (agora concentrado na Sprint 12).
 
-## As 3 personas
+A dor por trás do pedido: mesmo depois da Sprint 12 melhorar a qualidade da modelagem por IA, ela nunca vai acertar 100% dos casos — o usuário precisa de uma saída pra corrigir sem depender só do chat de refinamento (que já existe, mas é "às cegas": você descreve o que quer em texto, sem ver/arrastar o elemento diretamente).
 
-| Persona | Quem é | O que quer |
+**Importante, já decidido:** a edição manual é um modo **adicional**, não substitui a visualização atual. O Modo Apresentação (S10), o zoom/pan (S11-03) e o highlight de gargalos continuam sendo a experiência padrão ao abrir um processo — isso não muda. Editar é uma ação explícita ("entrar no modo edição"), não o comportamento default do viewer.
+
+## Perguntas de viabilidade a resolver no kickoff (antes de comprometer pontos)
+
+1. **Conflito com o chat de refinamento.** Hoje, cada instrução de chat gera uma nova versão via `PUT /processes/:id/bpmn`, reescrevendo o XML inteiro (inclusive layout, desde a decisão da S9 de não recalcular posições no refino). Se o usuário edita manualmente e *depois* usa o chat, a IA vê o XML editado como base — isso é o comportamento desejado, ou existe risco da IA "desfazer" ajustes manuais que não entendeu? Precisa de um teste manual dedicado antes de fechar escopo.
+2. **Convivência com o auto-layout.** O auto-layout (S9) roda só na geração inicial, não no refino — mas se o modo edição permite mover elementos livremente, o próximo refino via chat (que reescreve o XML completo) pode descartar posições ajustadas à mão, do mesmo jeito que já pode descartar ajustes de layout feitos hoje via edição direta no bpmn-js (o endpoint já permite isso, sem UI dedicada). Não é um risco novo introduzido por esta sprint, mas vale confirmar que o modo edição não piora essa situação existente.
+3. **Superfície do Modeler vs. Viewer.** Trocar de `Viewer` (read-only, leve) pra `Modeler` (paleta, context pad, edição direta de label, redesenho de conexões) é uma dependência bem maior do bpmn-js. Precisa confirmar que os módulos de zoom/pan (S11-03), Modo Apresentação (S10) e `TokenSimulationModule` continuam funcionando na visão padrão sem esse peso extra sendo carregado por padrão — só quando o modo edição é ativado explicitamente.
+4. **Escopo de "editável".** Editar tudo (mover, redesenhar conexão, trocar tipo de elemento, criar/remover elemento) é um Modeler completo — esforço bem maior do que editar só o que resolve os erros mais comuns encontrados na Sprint 12 (ex: só trocar tipo de gateway/atividade e editar label, sem redesenho livre de conexão). Vale decidir o escopo mínimo que resolve a dor real antes de estimar pontos.
+
+## Esboço de backlog (a confirmar/reestimar no kickoff, depois das perguntas acima)
+
+| Item | Descrição | Pontos (estimativa preliminar) |
 |---|---|---|
-| **A — Analista técnico** | Já entende BPMN, é quem hoje o produto atende bem (viewer técnico, chat de refinamento, gateways/raias/anotações corretos — foco da S12) | Modelar processos complexos com precisão, exportar pra ferramentas BPMN reais |
-| **B — Líder de equipe / gestor não-técnico** | Não conhece notação BPMN. Quer identificar e resolver gargalos na rotina da equipe | Instruir a equipe de forma simples; decidir rápido onde otimizar |
-| **C — Colaborador individual** | Não conhece notação BPMN. Quer documentar sua própria rotina | Documentar rápido pra treinar substitutos e organizar o próprio trabalho |
+| S13-01 | Botão explícito "Editar diagrama" — componente novo `BpmnEditor.tsx`, montado só quando o modo está ativo; troca pra `bpmn-js` `Modeler` com toolbar básica | 3 |
+| S13-02 | Edição de elementos: mover, editar label, redesenhar `sequenceFlow` | 3 |
+| S13-03 | Salvar via `PUT /processes/:id/bpmn` (endpoint já existe, já cria nova versão) + sair do modo edição volta pro `Viewer` normal | 1 |
+| S13-04 | Testes de não-regressão: Modo Apresentação, zoom/pan e highlight de gargalos continuam funcionando na visão padrão depois que o modo edição existir no bundle | 2 |
 
-## Brainstorm — ideias por persona
-
-**Persona A (já atendida hoje)** — o produto já entrega: viewer técnico, chat de refinamento, versionamento, exportação BPMN/PNG/PDF (S11), edição manual (S12). Sem pendência nova identificada nesta rodada.
-
-**Persona B (líder/gestor)**
-- *Dashboard de "saúde do processo"*: lista dos processos da equipe com um badge tipo "3 gargalos identificados", clicando vai direto pra aba "Sugestões" que já existe (reaproveita `bottleneck_analysis_service`, sem trabalho novo de IA).
-- *Resumo executivo*: usar o `summary` que já é gerado na geração inicial + destacar as sugestões de maior severidade num card no topo, em linguagem simples, sem termos BPMN.
-- O **Modo Apresentação (S10)** já é uma ferramenta forte pra essa persona — "instruir de maneira simples" é literalmente o que a animação resolve. Vale destacar isso mais na UI pra essa persona descobrir a feature (hoje é um botão discreto no canto do viewer).
-- *Antes/depois*: quando o líder aplica uma sugestão via chat, mostrar um comparativo simples ("de 6 passos para 4", "removida 1 aprovação manual") em vez de só a nova versão do diagrama.
-- *Checklist exportável*: lista numerada de passos em texto simples (sem notação), pra compartilhar com a equipe sem exigir que ninguém entenda BPMN.
-
-**Persona C (colaborador individual)**
-- *Guia de treinamento exportável*: PDF com título "Como fazer: [processo]" e passos numerados + o fluxograma simples (não o BPMN técnico), em vez de export técnico.
-- *Perguntas guiadas na gravação*: hoje o áudio é livre; um roteiro tipo "descreva o passo 1... o que você faz se der errado?" ajudaria quem trava na hora de gravar sem saber o que falar.
-- *Compartilhamento simples*: link direto pro guia, sem exigir que o substituto tenha conta na plataforma.
-
-## O que entra nesta sprint vs. vira backlog futuro
-
-Dado o volume de ideias acima, só o item com pedido explícito e mais alto valor imediato (fluxograma) entra nesta sprint com pontos comprometidos. As demais ideias (dashboard de gargalos, resumo executivo, antes/depois, checklist exportável, perguntas guiadas, compartilhamento sem conta) ficam registradas aqui como backlog priorizável — decisão de trazer alguma pra dentro desta sprint (se sobrar capacidade) ou pra próxima é do kickoff, não travada agora.
-
-## Decisão técnica em aberto — confirmar no kickoff
-
-Duas abordagens pro "fluxograma simples":
-
-| Abordagem | Custo | Prós | Contras |
-|---|---|---|---|
-| **Reskin do BPMN já gerado** (view mode) | ~8 pts | Reaproveita 100% do pipeline de IA já existente (uma fonte de verdade); esconde raias/pools/tipos de gateway visualmente (CSS + mapeamento de ícone), sem gerar nada novo | Estrutura de fundo continua sendo BPMN "de verdade" — se a IA modelar mal (S12), o fluxograma simples também herda o erro |
-| **Geração dedicada** (segunda chamada de IA com notação simplificada) | ~13+ pts | Pode ser genuinamente mais simples/didático, adaptado à persona não-técnica desde a geração | Dobra custo de IA por processo (chamada extra); duas fontes de verdade pra manter sincronizadas quando o usuário refina via chat |
-
-**Recomendação:** começar pela opção "reskin" (mais barata, reaproveita tudo) e só evoluir pra geração dedicada se as limitações de fidelidade se mostrarem bloqueantes na prática — mesmo padrão de decisão incremental já usado na S9 (Modo Apresentação: lib da comunidade primeiro, motor próprio só se necessário).
-
-## Backlog preliminar (revisar após decisão da tabela acima)
-
-| Item | Descrição | Pontos (se reskin) |
-|---|---|---|
-| S13-01 | Toggle "Fluxograma simples" / "BPMN técnico" no viewer | 2 |
-| S13-02 | Reestilizar diagrama no modo simples: esconder raias/pools, generalizar ícones de tipo de atividade (tudo vira retângulo arredondado), gateways viram losango genérico de decisão (sem X/+/O) | 4 |
-| S13-03 | Export "guia de treinamento" (PDF com passos numerados, linguagem simples) reaproveitando o modo fluxograma | 2 |
-| **Total** | | **~8** |
-
-## Como testar (planejado)
-
-1. Abrir um processo com raias, gateway exclusive e gateway paralelo → ativar "Fluxograma simples" → confirmar que raias/pools somem visualmente e os gateways viram losangos genéricos, sem perder a estrutura do fluxo
-2. Alternar entre os dois modos várias vezes → confirmar que não há perda de dados (é só apresentação, o XML por trás não muda)
-3. Exportar o guia de treinamento → PDF legível por alguém sem nenhum conhecimento de BPMN
+**Total preliminar: ~9 pontos** — sujeito a mudar bastante conforme as respostas do kickoff, principalmente a pergunta 4 (escopo de "editável").
 
 ## Riscos
 
-- "Reskin" pode não ser suficiente pra atender de verdade a persona C se a estrutura do BPMN subjacente for muito técnica (ex: muitos gateways aninhados de um processo real) — o risco fica menor se S12 (qualidade da modelagem) for concluída antes, já que aí a estrutura de base é mais limpa.
-- Escopo desta sprint deliberadamente conservador (só o fluxograma) — o dashboard pra líderes (persona B) é a ideia de maior potencial de valor percebido, mas foi propositalmente deixada de fora dos pontos comprometidos até validar interesse real com a stakeholder no kickoff.
+- Maior risco técnico do roadmap atual: troca de módulo bpmn-js (`Viewer` → `Modeler`) tem superfície de API bem maior, mais chance de regressão nos recursos já entregues (S10/S11-03) do que qualquer item anterior.
+- Se a pergunta de viabilidade 1 (conflito com refino via chat) revelar um problema real de UX (IA desfazendo edição manual sem explicar), pode ser necessário um item extra de "avisar o usuário" ou "preservar edição manual como contexto explícito pro chat" — não estimado ainda.
+
+## Como testar (planejado, a refinar após kickoff)
+
+1. Abrir um processo pronto → confirmar que a view padrão é a mesma de hoje (Viewer read-only, Modo Apresentação e zoom/pan disponíveis) → clicar em "Editar diagrama" → arrastar um elemento, editar o label de uma tarefa, redesenhar uma seta torta → salvar → confirmar nova versão criada em "Versões" com o XML corrigido → confirmar que volta pra view padrão (não fica preso no modo edição)
+2. Confirmar que o modo edição não quebra o Modo Apresentação nem o highlight de gargalos na view padrão (ambos dependem de IDs de elemento estáveis — mover/editar não pode trocar IDs)
+3. Editar manualmente, depois enviar uma instrução pelo chat → confirmar (ou documentar, se o resultado for inesperado) o que acontece com o ajuste manual
