@@ -28,12 +28,23 @@ async def create_tenant_user(
     password: str,
     name: str,
     role: str = "admin",
+    is_platform_admin: bool = False,
 ) -> None:
     existing = (
         await db.execute(select(Tenant).where(Tenant.slug == slug))
     ).scalar_one_or_none()
     if existing:
-        print(f"  ⚠️  Tenant '{slug}' já existe — pulando.")
+        # Tenant já existe — ainda garante is_platform_admin no usuário do
+        # seed (idempotente), pra rodar `make seed` de novo aplicar esse
+        # ajuste em bancos de dev já populados antes dele existir.
+        user = (
+            await db.execute(select(User).where(User.email == email))
+        ).scalar_one_or_none()
+        if user is not None and user.is_platform_admin != is_platform_admin:
+            user.is_platform_admin = is_platform_admin
+            print(f"  ✓ {company}: {email} — is_platform_admin={is_platform_admin} (atualizado)")
+        else:
+            print(f"  ⚠️  Tenant '{slug}' já existe — pulando.")
         return
 
     tenant = Tenant(name=company, slug=slug)
@@ -46,9 +57,10 @@ async def create_tenant_user(
         password_hash=hash_password(password),
         name=name,
         role=role,
+        is_platform_admin=is_platform_admin,
     )
     db.add(user)
-    print(f"  ✓ {company}: {email} / {password} ({role})")
+    print(f"  ✓ {company}: {email} / {password} ({role}{', platform admin' if is_platform_admin else ''})")
 
 
 async def seed() -> None:
@@ -62,6 +74,7 @@ async def seed() -> None:
             password="demo123",
             name="Admin Demo",
             role="admin",
+            is_platform_admin=True,
         )
         await create_tenant_user(
             db,

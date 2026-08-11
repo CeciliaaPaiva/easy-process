@@ -49,10 +49,14 @@ Após rodar `make seed` (passo 5 acima), os seguintes usuários ficam disponíve
 
 | Empresa (tenant) | Email | Senha | Role |
 |-------------------|-------|-------|------|
-| Demo Corp | `admin@demo.com` | `demo123` | admin |
+| Demo Corp | `admin@demo.com` | `demo123` | admin (+ platform admin) |
 | Acme Inc | `user@acme.com` | `acme123` | analyst |
 
+`admin@demo.com` também é **platform admin** (`is_platform_admin=True`), então é o único dos dois que enxerga a aba "Uso de IA" (restrita a admins da plataforma, não só admins do tenant — ver `CLAUDE.md`).
+
 Credenciais definidas em [`scripts/seed.py`](./scripts/seed.py) — apenas para ambiente de desenvolvimento, nunca usar em produção.
+
+> Já rodou `make seed` antes desta atualização? Rode `make seed` de novo — o script agora é idempotente também para `is_platform_admin` e atualiza o usuário existente.
 
 ---
 
