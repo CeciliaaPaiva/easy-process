@@ -43,6 +43,19 @@ Serviços disponíveis:
 
 ---
 
+## Login de teste
+
+Após rodar `make seed` (passo 5 acima), os seguintes usuários ficam disponíveis para login em http://localhost:3000 — cada um em um tenant isolado:
+
+| Empresa (tenant) | Email | Senha | Role |
+|-------------------|-------|-------|------|
+| Demo Corp | `admin@demo.com` | `demo123` | admin |
+| Acme Inc | `user@acme.com` | `acme123` | analyst |
+
+Credenciais definidas em [`scripts/seed.py`](./scripts/seed.py) — apenas para ambiente de desenvolvimento, nunca usar em produção.
+
+---
+
 ## Comandos úteis
 
 | Comando | Descrição |
@@ -119,13 +132,21 @@ easy-process/
 
 ## Roadmap
 
-| Sprint | Semanas | Entregável |
-|--------|---------|-----------|
-| ✅ Sprint 0 | 1-2 | Monorepo + Docker + estrutura + CI |
-| Sprint 1 | 3-4 | Autenticação JWT + multi-tenant |
-| Sprint 2 | 5-6 | Upload de áudio → transcrição → BPMN |
-| Sprint 3 | 7-8 | Visualizador BPMN + chat + exportação |
-| Sprint 4 | 9-10 | Documentação automática + deploy produção |
+| Sprint | Entregável | Status |
+|--------|-----------|--------|
+| Sprint 0 | Monorepo + Docker + estrutura + CI | ✅ Concluído |
+| Sprint 1 | Autenticação JWT + multi-tenant | ✅ Concluído |
+| Sprint 2 | Upload de áudio → transcrição → BPMN | ✅ Concluído |
+| Sprint 3 | Visualizador BPMN + chat + exportação | ✅ Concluído |
+| Sprint 4 | Documentação automática + deploy produção | ✅ Concluído |
+| Sprint 5–8 | Hardening, correções e ajustes pós-MVP | ✅ Concluído |
+| Sprint 9 | Migração da IA para Gemini (transcrição, geração, refino) | ✅ Concluído |
+| Sprint 10 | Correções de modelagem BPMN (gateways combinados) | ✅ Concluído |
+| Sprint 11 | Painel "Uso de IA" (custo por chamada, restrito a platform admin) | ✅ Concluído |
+| Sprint 12 | Pipeline em estágios: análise separada da modelagem | ✅ Concluído |
+| Sprint 13 | Edição manual do diagrama (kickoff) | 🔜 Próxima |
+
+> Release notes detalhadas de cada sprint em [`docs/releases/`](./docs/releases/). Este roadmap é atualizado a cada entrega — ver a release mais recente para o resumo completo: [`RELEASE-S12.md`](./docs/releases/RELEASE-S12.md).
 
 ---
 
