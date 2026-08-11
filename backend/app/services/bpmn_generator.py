@@ -21,7 +21,10 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.services.bpmn_analysis import ProcessAnalysisResult
 from app.services.bpmn_layout import LayoutError, apply_layout
-from app.services.bpmn_validator import validate_bpmn_xml
+from app.services.bpmn_validator import (
+    validate_bpmn_xml,
+    validate_external_actors_have_pools,
+)
 from app.services.llm_usage import record_usage
 
 _SYSTEM_INSTRUCTION = """\
@@ -154,6 +157,7 @@ class BpmnGeneratorService:
 
         summary = analysis.summary
         actors = [a.name for a in analysis.actors]
+        external_actors = [a.name for a in analysis.actors if a.is_external]
         tasks = [
             {"name": a.name, "responsible": a.responsible} for a in analysis.activities
         ]
@@ -185,6 +189,12 @@ class BpmnGeneratorService:
                     continue
 
                 valid, err = validate_bpmn_xml(bpmn_with_layout)
+                if valid:
+                    err = validate_external_actors_have_pools(
+                        bpmn_with_layout, external_actors
+                    )
+                    valid = not err
+
                 if valid:
                     return BpmnGenerationResult(
                         bpmn_xml=bpmn_with_layout,

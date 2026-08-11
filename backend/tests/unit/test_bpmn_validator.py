@@ -1,4 +1,7 @@
-from app.services.bpmn_validator import validate_bpmn_xml
+from app.services.bpmn_validator import (
+    validate_bpmn_xml,
+    validate_external_actors_have_pools,
+)
 
 VALID_BPMN = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -250,3 +253,72 @@ class TestValidateBpmnXml:
 </bpmn:definitions>"""
         ok, err = validate_bpmn_xml(xml)
         assert ok is True, err
+
+    def test_gateway_with_single_incoming_and_single_outgoing_returns_false(self):
+        """Um gateway com uma entrada e uma saída não decide nem junta nada —
+        achado real em S12-01 (`docs/sprints/SPRINT-12-investigacao.md`): um
+        parallelGateway de divisão saiu com uma única saída."""
+        xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Def_1">
+  <bpmn:process id="Process_1" isExecutable="false">
+    <bpmn:startEvent id="Start_1">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="Task_1" name="Preparar">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:parallelGateway id="Gateway_Pointless">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:task id="Task_2" name="Entregar">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="End_1">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="Task_1"/>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_1" targetRef="Gateway_Pointless"/>
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Gateway_Pointless" targetRef="Task_2"/>
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_2" targetRef="End_1"/>
+  </bpmn:process>
+</bpmn:definitions>"""
+        ok, err = validate_bpmn_xml(xml)
+        assert ok is False
+        assert "Gateway_Pointless" in err
+
+
+class TestValidateExternalActorsHavePools:
+    XML_WITH_EXTERNAL_POOL = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Def_1">
+  <bpmn:participant id="Participant_Cliente" name="Cliente"/>
+  <bpmn:process id="Process_1"/>
+</bpmn:definitions>"""
+
+    def test_no_external_actors_returns_empty(self):
+        assert validate_external_actors_have_pools("<xml/>", []) == ""
+
+    def test_external_actor_with_matching_pool_returns_empty(self):
+        err = validate_external_actors_have_pools(
+            self.XML_WITH_EXTERNAL_POOL, ["Cliente"]
+        )
+        assert err == ""
+
+    def test_external_actor_matches_pool_name_case_insensitively(self):
+        err = validate_external_actors_have_pools(
+            self.XML_WITH_EXTERNAL_POOL, ["cliente"]
+        )
+        assert err == ""
+
+    def test_missing_pool_for_external_actor_returns_error(self):
+        """Achado do S12-01: atores externos identificados corretamente na
+        análise, mas nunca virando bpmn:participant no XML."""
+        err = validate_external_actors_have_pools(
+            self.XML_WITH_EXTERNAL_POOL, ["Cliente", "Sistema iFood"]
+        )
+        assert "Sistema iFood" in err
+        assert "Cliente" not in err.split(":")[1]  # só o ator faltante é listado

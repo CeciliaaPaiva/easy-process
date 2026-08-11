@@ -40,6 +40,12 @@ def _analysis() -> ProcessAnalysisResult:
     )
 
 
+def _analysis_with_external_actor() -> ProcessAnalysisResult:
+    analysis = _analysis()
+    analysis.actors.append(ActorInfo("Cliente", is_external=True))
+    return analysis
+
+
 def _make_response(parsed: object) -> MagicMock:
     resp = MagicMock()
     resp.parsed = parsed
@@ -162,3 +168,25 @@ class TestBpmnGeneratorService:
         second_call_contents = mock_generate.call_args_list[1].kwargs["contents"]
         assert isinstance(second_call_contents, str)
         assert "not valid xml" in second_call_contents
+
+    @pytest.mark.asyncio
+    async def test_retries_when_external_actor_has_no_pool(
+        self, service, mock_generate
+    ):
+        """S12-03: XML estruturalmente válido, mas sem bpmn:participant pro
+        ator externo da análise, deve virar retry — regra de prompt sozinha
+        já era ignorada na prática (achado do S12-01)."""
+        xml_without_pool = VALID_BPMN  # não tem nenhum bpmn:participant
+        xml_with_pool = VALID_BPMN.replace(
+            '<bpmn:process id="Process_1">',
+            '<bpmn:participant id="Part_Cliente" name="Cliente"/>'
+            '<bpmn:process id="Process_1">',
+        )
+        mock_generate.side_effect = [
+            _make_response(_parsed(xml_without_pool)),
+            _make_response(_parsed(xml_with_pool)),
+        ]
+
+        result = await service.generate(_analysis_with_external_actor(), max_retries=2)
+        assert "Part_Cliente" in result.bpmn_xml
+        assert mock_generate.call_count == 2

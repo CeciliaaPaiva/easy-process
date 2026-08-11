@@ -45,7 +45,50 @@ def validate_bpmn_xml(xml: str) -> tuple[bool, str]:
     if combined_gateway_error:
         return False, combined_gateway_error
 
+    pointless_gateway_error = _find_pointless_gateway(root)
+    if pointless_gateway_error:
+        return False, pointless_gateway_error
+
     return True, ""
+
+
+def validate_external_actors_have_pools(xml: str, external_actors: list[str]) -> str:
+    """Cada ator classificado como externo na etapa de análise (S12-02) deve
+    virar um bpmn:participant "caixa preta" no XML final. Regra de prompt
+    sozinha (SEMANTIC_MODELING_RULES) já existe e já era ignorada na
+    prática — achado do S12-01, ver
+    `docs/sprints/SPRINT-12-investigacao.md`. Comparação case-insensitive
+    e por substring, tolerante a pequenas variações de fraseado entre o
+    nome do ator na análise e o `name` do participant no XML.
+
+    Não recebe `xml` inválido/malformado como responsabilidade sua —
+    chame só depois de `validate_bpmn_xml` já ter aprovado o XML."""
+    if not external_actors:
+        return ""
+
+    root = etree.fromstring(xml.encode())
+    participant_names = [
+        (e.get("name") or "").strip().lower()
+        for e in root.iter()
+        if e.tag.split("}")[-1] == "participant"
+    ]
+
+    missing = [
+        actor
+        for actor in external_actors
+        if not any(
+            name and (actor.strip().lower() in name or name in actor.strip().lower())
+            for name in participant_names
+        )
+    ]
+    if missing:
+        return (
+            "Ator(es) externo(s) identificados na análise sem bpmn:participant "
+            f"correspondente no XML: {', '.join(missing)}. Cada ator externo deve "
+            "virar um participant 'caixa preta' (sem laneSet, sem elementos "
+            "internos detalhados)."
+        )
+    return ""
 
 
 _GATEWAY_TAGS = {
@@ -77,6 +120,33 @@ def _find_combined_gateway(root: etree._Element) -> str:
                 "forma. Separe em dois gateways do mesmo tipo: um de junção "
                 "(join, só com as entradas e uma única saída) seguido por um de "
                 "divisão (split, uma única entrada e as saídas)."
+            )
+    return ""
+
+
+def _find_pointless_gateway(root: etree._Element) -> str:
+    """Um gateway com uma única entrada e uma única saída não decide (split)
+    nem junta (join) nada — não deveria existir; o sequenceFlow deveria ligar
+    os elementos vizinhos direto, sem gateway no meio. Achado real em
+    S12-01 (`docs/sprints/SPRINT-12-investigacao.md`): um parallelGateway de
+    divisão saiu com uma única saída em vez de duas ou mais."""
+    for element in root.iter():
+        tag = element.tag.split("}")[-1].lower()
+        if tag not in _GATEWAY_TAGS:
+            continue
+        incoming = sum(1 for c in element if c.tag.split("}")[-1] == "incoming")
+        outgoing = sum(1 for c in element if c.tag.split("}")[-1] == "outgoing")
+        # incoming==outgoing==0 não é "sem sentido" — é só um XML que
+        # representa conectividade via sourceRef/targetRef do sequenceFlow
+        # em vez de <incoming>/<outgoing> explícitos (padrão comum antes do
+        # auto-layout rodar); só o caso exatamente 1-e-1 é o bug real.
+        if incoming == 1 and outgoing == 1:
+            return (
+                f"O gateway '{element.get('id', '?')}' tem {incoming} entrada(s) e "
+                f"{outgoing} saída(s) — um gateway só faz sentido como divisão "
+                "(1 entrada, 2+ saídas) ou junção (2+ entradas, 1 saída). Remova "
+                "o gateway e ligue o sequenceFlow direto entre os elementos "
+                "anterior e seguinte."
             )
     return ""
 
