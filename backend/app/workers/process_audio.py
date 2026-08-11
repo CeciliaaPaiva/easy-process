@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.models.process import Process, ProcessVersion
+from app.services.bpmn_analysis import analysis_service
 from app.services.bpmn_generator import bpmn_generator_service
 from app.services.transcription import transcription_service
 
@@ -32,10 +33,18 @@ async def process_audio_pipeline(process_id: uuid.UUID) -> None:
             await db.commit()
 
             await _update_status(db, process, "generating")
-            logger.info("Gerando BPMN para o processo %s", process_id)
+            logger.info("Analisando processo %s", process_id)
+
+            analysis = await analysis_service.analyze(
+                transcription.text,
+                process_id=str(process_id),
+                tenant_id=str(process.tenant_id),
+            )
+
+            logger.info("Modelando BPMN para o processo %s", process_id)
 
             result = await bpmn_generator_service.generate(
-                transcription.text,
+                analysis,
                 process_id=str(process_id),
                 tenant_id=str(process.tenant_id),
             )

@@ -35,6 +35,10 @@ class TestPipeline:
             ),
         )
         mocker.patch(
+            "app.workers.process_audio.analysis_service.analyze",
+            return_value=None,  # generate() abaixo está mockado, ignora o valor
+        )
+        mocker.patch(
             "app.workers.process_audio.bpmn_generator_service.generate",
             return_value=BpmnGenerationResult(
                 bpmn_xml=VALID_BPMN,

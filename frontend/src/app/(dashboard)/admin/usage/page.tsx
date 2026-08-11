@@ -10,7 +10,8 @@ import { useToast } from '@/components/ui/toast'
 
 const stageLabels: Record<string, string> = {
   transcription: 'Transcrição',
-  bpmn_generation: 'Geração BPMN',
+  bpmn_analysis: 'Análise',
+  bpmn_modeling: 'Modelagem BPMN',
   bpmn_refinement: 'Refinamento (chat)',
 }
 

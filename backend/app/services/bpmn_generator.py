@@ -1,5 +1,17 @@
+"""Etapa de MODELAGEM do pipeline de geração de BPMN (Sprint 12, S12-02).
+
+Responsabilidade única: traduzir o grafo já analisado por `bpmn_analysis.py`
+para XML BPMN 2.0 válido. Toda decisão semântica (tipo de gateway, tipo de
+atividade, ator interno/externo, pontos de anotação) já foi tomada na etapa
+de análise — esta etapa não reinterpreta o processo, só formata.
+
+Antes da Sprint 12 este serviço recebia a transcrição bruta e fazia análise
+e tradução na mesma chamada — ver `docs/sprints/SPRINT-12-plano.md` para o
+raciocínio da separação."""
+
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from google import genai
@@ -7,30 +19,53 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services.bpmn_analysis import ProcessAnalysisResult
 from app.services.bpmn_layout import LayoutError, apply_layout
-from app.services.bpmn_prompts import SEMANTIC_MODELING_RULES
 from app.services.bpmn_validator import validate_bpmn_xml
 from app.services.llm_usage import record_usage
 
-_SYSTEM_INSTRUCTION = f"""\
-Você é um especialista em modelagem de processos BPMN 2.0.
+_SYSTEM_INSTRUCTION = """\
+Você é uma tradutora de um grafo de processo já analisado para BPMN 2.0 XML.
+Toda decisão semântica (tipo de gateway, tipo de atividade, quem é ator
+interno/externo, pontos de anotação) já foi tomada na etapa de análise —
+sua única tarefa é TRADUZIR o grafo abaixo para XML válido, sem
+reinterpretar o processo.
 
-Analise a transcrição de uma entrevista fornecida pelo usuário e gere:
-1. Um diagrama BPMN 2.0 em XML válido com startEvent, endEvent, Tasks e SequenceFlows
-2. Um resumo do processo (máx 200 palavras)
-3. Lista de atores/participantes identificados
-4. Lista de tarefas com responsável
-
-{SEMANTIC_MODELING_RULES}
+FORMATO DO GRAFO DE ENTRADA:
+- `activities`: cada uma vira um elemento bpmn:<activity_type>Task (ex:
+  activity_type="manual" → bpmn:manualTask; "generic" → bpmn:task), com o
+  `id` do grafo como id do elemento e `name` como o label.
+- `gateways`: cada um vira bpmn:exclusiveGateway / bpmn:parallelGateway /
+  bpmn:inclusiveGateway conforme `gateway_type`, com o `id` do grafo como id
+  do elemento. Se tiver `question`, essa pergunta vira o rótulo do gateway
+  ou uma anotação associada a ele.
+- `flows`: cada um vira um bpmn:sequenceFlow ligando os ids correspondentes;
+  `source_id`/`target_id` "start"/"end"/"end:<motivo>" indicam onde criar
+  bpmn:startEvent/bpmn:endEvent (um endEvent por motivo distinto de
+  término, usando o texto após "end:" como name quando presente); `label`,
+  se houver, vira o atributo `name` do sequenceFlow.
+- `actors`: atores com `is_external=false` (quando houver 2 ou mais) viram
+  raias — UM ÚNICO bpmn:participant principal com bpmn:laneSet contendo uma
+  bpmn:lane por ator, cada lane com bpmn:flowNodeRef listando os ids das
+  atividades daquele responsible. Com 0 ou 1 ator interno, NÃO crie
+  participant/laneSet. Atores com `is_external=true` viram um
+  bpmn:participant adicional, um por ator, SEM laneSet e SEM elementos
+  internos (pool "caixa preta").
+- `annotations`: cada uma vira um bpmn:textAnnotation associado ao
+  `step_id` via bpmn:association.
+- `business_rules`: se ainda não estiverem cobertas por uma anotação,
+  considere adicionar uma bpmn:textAnnotation resumindo a regra no ponto do
+  processo onde ela se aplica.
 
 IMPORTANTE sobre o XML: gere APENAS os elementos semânticos do processo —
-startEvent, endEvent, tasks (do tipo correto), gateways (do tipo correto),
-sequenceFlows, e opcionalmente bpmn:participant/bpmn:laneSet/bpmn:lane e
-bpmn:textAnnotation/bpmn:association conforme as regras acima — cada elemento
-com um id único. NÃO inclua bpmndi:BPMNDiagram nem qualquer elemento de
-diagrama/layout (BPMNShape, BPMNEdge, Bounds, waypoint) — o layout visual é
-calculado automaticamente depois, fora do seu XML. NÃO adicione atributos de
-cor/estilo nem namespaces além de bpmn.
+startEvent, endEvent, tasks, gateways, sequenceFlows,
+participant/laneSet/lane, textAnnotation/association — cada um usando o id
+indicado no grafo quando existir (crie um id novo só para elementos que o
+grafo não tem, como o participant principal). NÃO inclua
+bpmndi:BPMNDiagram nem qualquer elemento de diagrama/layout (BPMNShape,
+BPMNEdge, Bounds, waypoint) — o layout visual é calculado automaticamente
+depois, fora do seu XML. NÃO adicione atributos de cor/estilo nem
+namespaces além de bpmn.
 
 Responda respeitando estritamente o schema JSON fornecido."""
 
@@ -45,16 +80,8 @@ semânticos do processo, sem bpmndi:BPMNDiagram — e retorne o JSON completo
 novamente."""
 
 
-class _BpmnTask(BaseModel):
-    name: str
-    responsible: str
-
-
-class _BpmnGenerationSchema(BaseModel):
+class _BpmnXmlSchema(BaseModel):
     bpmn_xml: str
-    summary: str
-    actors: list[str]
-    tasks: list[_BpmnTask]
 
 
 @dataclass
@@ -62,7 +89,45 @@ class BpmnGenerationResult:
     bpmn_xml: str
     summary: str
     actors: list[str] = field(default_factory=list)
-    tasks: list[dict] = field(default_factory=list)
+    tasks: list[dict[str, str]] = field(default_factory=list)
+
+
+def _serialize_graph(analysis: ProcessAnalysisResult) -> str:
+    """Serializa o grafo já analisado no formato compacto que o prompt de
+    tradução espera — sem os campos que a modelagem não usa (summary,
+    business_rules já viram texto/anotação tratados à parte)."""
+    graph = {
+        "actors": [
+            {"name": a.name, "is_external": a.is_external} for a in analysis.actors
+        ],
+        "activities": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "responsible": a.responsible,
+                "activity_type": a.activity_type,
+            }
+            for a in analysis.activities
+        ],
+        "gateways": [
+            {
+                "id": g.id,
+                "role": g.role,
+                "gateway_type": g.gateway_type,
+                "question": g.question,
+            }
+            for g in analysis.gateways
+        ],
+        "flows": [
+            {"source_id": f.source_id, "target_id": f.target_id, "label": f.label}
+            for f in analysis.flows
+        ],
+        "annotations": [
+            {"step_id": a.step_id, "text": a.text} for a in analysis.annotations
+        ],
+        "business_rules": analysis.business_rules,
+    }
+    return json.dumps(graph, ensure_ascii=False)
 
 
 class BpmnGeneratorService:
@@ -72,24 +137,26 @@ class BpmnGeneratorService:
 
     async def generate(
         self,
-        transcription: str,
+        analysis: ProcessAnalysisResult,
         max_retries: int = 3,
         process_id: str | None = None,
         tenant_id: str | None = None,
     ) -> BpmnGenerationResult:
-        if not transcription or len(transcription.strip()) < 50:
-            raise ValueError("Transcrição muito curta ou vazia (mínimo 50 caracteres)")
-
-        transcription = transcription[:50_000]
         config = types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
             response_mime_type="application/json",
-            response_schema=_BpmnGenerationSchema,
+            response_schema=_BpmnXmlSchema,
             temperature=0.1,
         )
 
         last_error = "formato inválido"
-        prompt = f"TRANSCRIÇÃO:\n{transcription}"
+        prompt = f"GRAFO DO PROCESSO (JSON):\n{_serialize_graph(analysis)}"
+
+        summary = analysis.summary
+        actors = [a.name for a in analysis.actors]
+        tasks = [
+            {"name": a.name, "responsible": a.responsible} for a in analysis.activities
+        ]
 
         for attempt in range(1, max_retries + 1):
             response = await self._client.aio.models.generate_content(
@@ -98,7 +165,7 @@ class BpmnGeneratorService:
                 config=config,
             )
             await record_usage(
-                "bpmn_generation",
+                "bpmn_modeling",
                 tenant_id,
                 process_id,
                 response,
@@ -121,16 +188,16 @@ class BpmnGeneratorService:
                 if valid:
                     return BpmnGenerationResult(
                         bpmn_xml=bpmn_with_layout,
-                        summary=data.summary,
-                        actors=data.actors,
-                        tasks=[t.model_dump() for t in data.tasks],
+                        summary=summary,
+                        actors=actors,
+                        tasks=tasks,
                     )
                 last_error = err
                 prompt = _RETRY_PROMPT.format(error=err, invalid_xml=data.bpmn_xml)
             else:
                 last_error = "JSON inválido na resposta"
                 prompt = (
-                    f"TRANSCRIÇÃO:\n{transcription}\n\n"
+                    f"GRAFO DO PROCESSO (JSON):\n{_serialize_graph(analysis)}\n\n"
                     "A resposta anterior não seguiu o schema JSON esperado. "
                     "Retorne novamente respeitando o schema."
                 )

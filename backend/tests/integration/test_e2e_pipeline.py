@@ -61,6 +61,10 @@ class TestFullPipelineFlow:
             return_value=TranscriptionResult(text=TRANSCRIPTION, duration=30.0),
         )
         mocker.patch(
+            "app.workers.process_audio.analysis_service.analyze",
+            return_value=None,  # generate() abaixo está mockado, ignora o valor
+        )
+        mocker.patch(
             "app.workers.process_audio.bpmn_generator_service.generate",
             return_value=BpmnGenerationResult(
                 bpmn_xml=BPMN_V1,

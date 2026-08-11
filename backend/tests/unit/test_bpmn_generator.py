@@ -2,6 +2,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.services.bpmn_analysis import (
+    ActivityInfo,
+    ActorInfo,
+    FlowInfo,
+    ProcessAnalysisResult,
+)
 from app.services.bpmn_generator import BpmnGeneratorService
 
 VALID_BPMN = """\
@@ -14,14 +20,24 @@ VALID_BPMN = """\
   </bpmn:process>
 </bpmn:definitions>"""
 
-MOCK_RESPONSE = {
-    "bpmn_xml": VALID_BPMN,
-    "summary": "Processo de aprovação de solicitações.",
-    "actors": ["Analista", "Gerente"],
-    "tasks": [{"name": "Aprovar solicitação", "responsible": "Gerente"}],
-}
 
-TRANSCRIPTION = "O analista recebe a solicitação e encaminha para aprovar."
+def _analysis() -> ProcessAnalysisResult:
+    return ProcessAnalysisResult(
+        summary="Processo de aprovação de solicitações.",
+        actors=[ActorInfo("Gerente", is_external=False)],
+        activities=[
+            ActivityInfo(
+                id="aprovar_solicitacao",
+                name="Aprovar solicitação",
+                responsible="Gerente",
+                activity_type="user",
+            )
+        ],
+        flows=[
+            FlowInfo(source_id="start", target_id="aprovar_solicitacao"),
+            FlowInfo(source_id="aprovar_solicitacao", target_id="end"),
+        ],
+    )
 
 
 def _make_response(parsed: object) -> MagicMock:
@@ -32,15 +48,10 @@ def _make_response(parsed: object) -> MagicMock:
     return resp
 
 
-def _parsed(data: dict) -> MagicMock:
+def _parsed(bpmn_xml: str) -> MagicMock:
     """Simula o objeto Pydantic retornado em response.parsed pelo google-genai."""
     parsed = MagicMock()
-    parsed.bpmn_xml = data["bpmn_xml"]
-    parsed.summary = data.get("summary", "")
-    parsed.actors = data.get("actors", [])
-    parsed.tasks = [
-        MagicMock(model_dump=MagicMock(return_value=t)) for t in data.get("tasks", [])
-    ]
+    parsed.bpmn_xml = bpmn_xml
     return parsed
 
 
@@ -58,40 +69,31 @@ class TestBpmnGeneratorService:
 
     @pytest.mark.asyncio
     async def test_generates_valid_bpmn(self, service, mock_generate):
-        mock_generate.return_value = _make_response(_parsed(MOCK_RESPONSE))
+        mock_generate.return_value = _make_response(_parsed(VALID_BPMN))
 
-        result = await service.generate(TRANSCRIPTION)
+        result = await service.generate(_analysis())
 
-        # O LLM devolve só o XML semântico; o layout (bpmndi) é calculado em
-        # Python via apply_layout — o resultado final inclui o diagrama.
+        # O LLM devolve só o XML semântico; o layout (bpmndi) é calculado
+        # em Python via apply_layout — o resultado final inclui o diagrama.
         assert "Start_1" in result.bpmn_xml
         assert "bpmndi:BPMNDiagram" in result.bpmn_xml
-        assert result.summary == MOCK_RESPONSE["summary"]
-        assert result.actors == MOCK_RESPONSE["actors"]
-        assert result.tasks == MOCK_RESPONSE["tasks"]
-
-    @pytest.mark.asyncio
-    async def test_raises_value_error_for_short_transcription(self, service):
-        with pytest.raises(ValueError, match="curta"):
-            await service.generate("curto")
+        # summary/actors/tasks vêm da análise, não são pedidos de novo ao LLM
+        # de modelagem — reduz tokens de saída e evita divergência entre as
+        # duas etapas.
+        assert result.summary == "Processo de aprovação de solicitações."
+        assert result.actors == ["Gerente"]
+        assert result.tasks == [
+            {"name": "Aprovar solicitação", "responsible": "Gerente"}
+        ]
 
     @pytest.mark.asyncio
     async def test_retries_on_invalid_bpmn_then_succeeds(self, service, mock_generate):
         mock_generate.side_effect = [
-            _make_response(
-                _parsed(
-                    {
-                        "bpmn_xml": "not valid xml",
-                        "summary": "",
-                        "actors": [],
-                        "tasks": [],
-                    }
-                )
-            ),
-            _make_response(_parsed(MOCK_RESPONSE)),
+            _make_response(_parsed("not valid xml")),
+            _make_response(_parsed(VALID_BPMN)),
         ]
 
-        result = await service.generate(TRANSCRIPTION, max_retries=2)
+        result = await service.generate(_analysis(), max_retries=2)
         assert "startEvent" in result.bpmn_xml or "Start_1" in result.bpmn_xml
 
     @pytest.mark.asyncio
@@ -99,7 +101,7 @@ class TestBpmnGeneratorService:
         mock_generate.return_value = _make_response(None)
 
         with pytest.raises(RuntimeError, match="tentativas"):
-            await service.generate(TRANSCRIPTION, max_retries=2)
+            await service.generate(_analysis(), max_retries=2)
 
     @pytest.mark.asyncio
     async def test_retries_when_layout_succeeds_but_bpmn_semantically_invalid(
@@ -116,20 +118,11 @@ class TestBpmnGeneratorService:
             "</bpmn:process></bpmn:definitions>"
         )
         mock_generate.side_effect = [
-            _make_response(
-                _parsed(
-                    {
-                        "bpmn_xml": missing_end_event,
-                        "summary": "",
-                        "actors": [],
-                        "tasks": [],
-                    }
-                )
-            ),
-            _make_response(_parsed(MOCK_RESPONSE)),
+            _make_response(_parsed(missing_end_event)),
+            _make_response(_parsed(VALID_BPMN)),
         ]
 
-        result = await service.generate(TRANSCRIPTION, max_retries=2)
+        result = await service.generate(_analysis(), max_retries=2)
         assert "bpmndi:BPMNDiagram" in result.bpmn_xml
 
     @pytest.mark.asyncio
@@ -145,15 +138,11 @@ class TestBpmnGeneratorService:
             'id="Def_1"><bpmn:process id="Process_1"/></bpmn:definitions>'
         )
         mock_generate.side_effect = [
-            _make_response(
-                _parsed(
-                    {"bpmn_xml": empty_bpmn, "summary": "", "actors": [], "tasks": []}
-                )
-            ),
-            _make_response(_parsed(MOCK_RESPONSE)),
+            _make_response(_parsed(empty_bpmn)),
+            _make_response(_parsed(VALID_BPMN)),
         ]
 
-        result = await service.generate(TRANSCRIPTION, max_retries=2)
+        result = await service.generate(_analysis(), max_retries=2)
         assert "bpmndi:BPMNDiagram" in result.bpmn_xml
 
     @pytest.mark.asyncio
@@ -164,20 +153,11 @@ class TestBpmnGeneratorService:
         turnos anteriores — o retry inclui o XML inválido para correção
         direcionada, sem reenviar toda a conversa."""
         mock_generate.side_effect = [
-            _make_response(
-                _parsed(
-                    {
-                        "bpmn_xml": "not valid xml",
-                        "summary": "",
-                        "actors": [],
-                        "tasks": [],
-                    }
-                )
-            ),
-            _make_response(_parsed(MOCK_RESPONSE)),
+            _make_response(_parsed("not valid xml")),
+            _make_response(_parsed(VALID_BPMN)),
         ]
 
-        await service.generate(TRANSCRIPTION, max_retries=2)
+        await service.generate(_analysis(), max_retries=2)
 
         second_call_contents = mock_generate.call_args_list[1].kwargs["contents"]
         assert isinstance(second_call_contents, str)

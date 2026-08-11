@@ -39,6 +39,10 @@ async def _ready_process(client, mocker) -> tuple[dict, str]:
         return_value=TranscriptionResult(text="Processo de aprovação.", duration=10.0),
     )
     mocker.patch(
+        "app.workers.process_audio.analysis_service.analyze",
+        return_value=None,  # generate() abaixo está mockado, ignora o valor
+    )
+    mocker.patch(
         "app.workers.process_audio.bpmn_generator_service.generate",
         return_value=BpmnGenerationResult(
             bpmn_xml=VALID_BPMN, summary="Aprovação.", actors=[], tasks=[]
