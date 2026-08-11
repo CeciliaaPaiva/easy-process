@@ -56,6 +56,31 @@ class TestExtractUsage:
 
         assert usage.estimated_cost_usd == 0.0
 
+    def test_unknown_model_logs_warning(self, caplog):
+        """S12-05: modelo fora da tabela de preços não pode mais falhar em
+        silêncio — o painel 'Uso de IA' mostraria custo $0 sem ninguém
+        perceber que a tabela está desatualizada. Precisa ficar visível
+        nos logs."""
+        import logging
+
+        response = _make_response(prompt_tokens=1000, output_tokens=200)
+
+        with caplog.at_level(logging.WARNING, logger="llm_usage"):
+            extract_usage(response, "modelo-desconhecido")
+
+        assert "modelo-desconhecido" in caplog.text
+        assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+    def test_known_model_does_not_log_warning(self, caplog):
+        import logging
+
+        response = _make_response(prompt_tokens=1000, output_tokens=200)
+
+        with caplog.at_level(logging.WARNING, logger="llm_usage"):
+            extract_usage(response, "gemini-flash-lite-latest")
+
+        assert caplog.records == []
+
     def test_missing_usage_metadata_defaults_to_zero(self):
         response = MagicMock()
         response.usage_metadata = None

@@ -45,6 +45,20 @@ def extract_usage(response: object, model_name: str) -> LlmUsage:
         prompt_tokens + output_tokens
     )
 
+    if model_name not in _PRICING_PER_MILLION:
+        # S12-05: antes caía silenciosamente em custo $0 — incoerência
+        # invisível no painel "Uso de IA" se um modelo novo/renomeado for
+        # configurado sem atualizar esta tabela. Agora fica visível nos
+        # logs (não interrompe o pipeline — instrumentação de custo não é
+        # caminho crítico, ver `record_usage`), e quem monitora logs vê o
+        # aviso. Atualizar `_PRICING_PER_MILLION` sempre que um
+        # GEMINI_MODEL_* novo for configurado (ver CLAUDE.md).
+        logger.warning(
+            "llm_usage: modelo '%s' fora da tabela de preços — custo estimado "
+            "em $0 para esta chamada, tabela precisa ser atualizada",
+            model_name,
+        )
+
     input_price, output_price = _PRICING_PER_MILLION.get(model_name, (0.0, 0.0))
     uncached_prompt_tokens = max(prompt_tokens - cached_tokens, 0)
     cost = (

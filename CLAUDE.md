@@ -380,8 +380,26 @@ Retorna JSON com:
 | BPMN com XML inválido | Loop de validação + retry corretivo (até 3x) |
 | Gemini API indisponível/lenta | Retry com backoff exponencial; notificar usuário |
 | Qualidade de transcrição pt-BR ruim | Permitir edição da transcrição antes de gerar BPMN |
-| Preço por token do Gemini mudar sem aviso | Tabela de preços em `llm_usage.py` é hardcoded e não vem de API — revisar manualmente quando o Gemini mudar tabela (painel "Uso de IA" fica incoerente até isso ser atualizado) |
+| Preço por token do Gemini mudar sem aviso | Tabela de preços em `llm_usage.py` é hardcoded e não vem de API (S12-05: agora loga warning quando um modelo não está na tabela, em vez de custo $0 silencioso) — revisar manualmente quando o Gemini mudar tabela ou um `GEMINI_MODEL_*` novo for configurado |
 | Vazamento de dados entre tenants | Testes de isolamento automatizados; middleware que impede bypass |
+
+---
+
+## Atualizando a tabela de preços do Gemini (`llm_usage.py`)
+
+`_PRICING_PER_MILLION` em `backend/app/services/llm_usage.py` é uma tabela
+hardcoded (USD por 1M tokens de input/output), não vem de nenhuma API — o
+painel "Uso de IA" só é coerente enquanto essa tabela bater com o preço real
+cobrado pelo Gemini. Atualizar sempre que:
+- Um `GEMINI_MODEL`/`GEMINI_MODEL_TRANSCRIPTION`/`_ANALYSIS`/`_GENERATION`/
+  `_REFINEMENT` novo for configurado em produção (`.env`) — adicionar a
+  entrada na tabela **antes** do deploy, não depois.
+- O Google anunciar mudança de preço pra um modelo já usado (já aconteceu
+  2x durante a S9 — ver `docs/releases/RELEASE-S9.md`).
+
+Se um modelo não estiver na tabela, `extract_usage` loga um `logger.warning`
+(`logger="llm_usage"`) em vez de falhar silenciosamente com custo $0 — vale
+monitorar esse log em produção. Preço oficial: [ai.google.dev/pricing](https://ai.google.dev/pricing).
 
 ---
 
