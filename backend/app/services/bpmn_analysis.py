@@ -68,6 +68,27 @@ por transições (`flows`), não como texto livre:
   explicando algo que a transcrição deixou implícito — mesmo critério de
   uso moderado da regra 4 acima.
 
+EXEMPLO — todo gateway "split" precisa de 2 ou mais saídas em `flows`, e
+todo gateway "join" precisa de 2 ou mais entradas; um gateway com só uma
+saída (split) ou só uma entrada (join) não decide nem junta nada e é um
+erro (achado real: um "parallelGateway" de divisão saiu com uma única
+saída em vez de duas ou mais — não repita esse erro):
+
+  ERRADO (gateway sem sentido — só uma saída, não é um split de verdade):
+    gateways: [{{"id": "gw_1", "role": "split", "gateway_type": "parallel"}}]
+    flows: [{{"source_id": "gw_1", "target_id": "buscar_entregador"}}]
+
+  CERTO (2 saídas — agora sim divide o fluxo em dois caminhos paralelos):
+    gateways: [{{"id": "gw_1", "role": "split", "gateway_type": "parallel"}}]
+    flows: [
+      {{"source_id": "gw_1", "target_id": "preparar_pedido"}},
+      {{"source_id": "gw_1", "target_id": "buscar_entregador"}}
+    ]
+
+Se a transcrição descrever só UM caminho depois de um ponto que parecia
+decisão, NÃO crie gateway ali — é só uma sequência normal de atividades,
+sem `flows` do tipo split/join.
+
 Responda respeitando estritamente o schema JSON fornecido — sem markdown,
 sem texto fora do JSON."""
 
