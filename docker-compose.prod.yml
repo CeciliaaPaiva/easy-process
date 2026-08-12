@@ -1,38 +1,20 @@
+# Stack de produção deste host ("claudinha"). O Cloudflare Tunnel já
+# termina TLS e encaminha https://easyprocess.ceciliap.com para
+# http://localhost:8393 (rota gerenciada no painel da Cloudflare, fixa —
+# ver CLAUDE.md, seção "Ambientes"). Por isso não há nginx/certbot aqui:
+# rodariam redundantes e disputariam a porta 80 com o Caddy do host, que
+# já serve o domínio interno de dev (*.claudinha.local).
+name: easyprocess-prod
+
 services:
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
-      - certbot_www:/var/www/certbot:ro
-      - certbot_conf:/etc/letsencrypt:ro
-    depends_on:
-      - frontend
-      - backend
-    restart: unless-stopped
-    networks:
-      - app-network
-
-  certbot:
-    image: certbot/certbot
-    volumes:
-      - certbot_www:/var/www/certbot
-      - certbot_conf:/etc/letsencrypt
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done'"
-    restart: unless-stopped
-
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://api.seudominio.com}
+      dockerfile: Dockerfile.prod
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+    ports:
+      - "8393:3000"
     restart: unless-stopped
     networks:
       - app-network
@@ -42,6 +24,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 --bind 0.0.0.0:8000 --timeout 120 --access-logfile - --error-logfile -
+    expose:
+      - "8000"
     volumes:
       - uploads:/data/uploads
     env_file:
@@ -94,8 +78,6 @@ services:
 volumes:
   pgdata:
   uploads:
-  certbot_www:
-  certbot_conf:
 
 networks:
   app-network:

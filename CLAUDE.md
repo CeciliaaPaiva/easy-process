@@ -97,7 +97,67 @@ make lint          # Ruff + Black no backend
 make migrate       # Aplica migrations (alembic upgrade head)
 make migration MSG="desc"  # Cria nova migration
 make seed          # Popula banco com dados de desenvolvimento
+
+make deploy        # Build + up -d + migrate da stack de produção
+make prod-up       # Sobe a stack de produção sem rebuild
+make prod-down     # Para a stack de produção
+make prod-logs     # Acompanha logs da stack de produção
+make prod-migrate  # Aplica migrations em produção
 ```
+
+---
+
+## Ambientes
+
+Duas stacks Docker Compose completamente separadas rodam nesta máquina
+("claudinha"), com nomes de projeto (`name:`) distintos para nunca colidir
+em containers/volumes:
+
+| | Dev (`docker-compose.yml`, projeto `easyprocess-dev`) | Produção (`docker-compose.prod.yml`, projeto `easyprocess-prod`) |
+|---|---|---|
+| Domínio | `http://easyprocess.claudinha.local` (interno, via Caddy do host) | `https://easyprocess.ceciliap.com` (público, via Cloudflare Tunnel) |
+| Porta do frontend no host | `8104` | `8393` |
+| Código | bind-mount, hot reload (`uvicorn --reload`, Next dev) | build (imagem), sem bind-mount — só reflete o que estiver commitado |
+| Banco | `db` do próprio compose (porta `5433` no host) | `db` do compose de prod (sem porta publicada), dados nunca compartilhados com o dev |
+| Segredos | `.env` | `.env.production` (não versionado; gerar a partir de `.env.production.example`) |
+| Subir | `make up` | `make deploy` (rebuild) ou `make prod-up` (sem rebuild) |
+
+**Por que a porta 8393 é fixa para produção:** o Cloudflare Tunnel desta
+máquina é *token-based*, com o roteamento de hostname configurado no
+painel da Cloudflare (não há `/etc/cloudflared/config.yml` local editável
+por aqui). O ingress atual mapeia
+`easyprocess.ceciliap.com -> http://localhost:8393` — mudar isso exige
+acesso ao painel, não só ao código. Por isso a stack de produção sempre
+publica o frontend na 8393, e a de dev usa outra porta (hoje 8104,
+registrada via a skill `dev-env`).
+
+**`frontend/Dockerfile.prod`** faz build real (`next build`) + `next start`
+— o `frontend/Dockerfile` original só roda `next dev` (nunca teve modo de
+produção; `docker-compose.prod.yml` usava ele por engano até 2026-08-12,
+o que quebrava com "Module parse failed" no `globals.css` assim que
+`NODE_ENV=production` mudava o pipeline do PostCSS/Tailwind sem o build
+correspondente).
+
+**Cuidado com `docker compose -f docker-compose.prod.yml` sem `--env-file`:**
+o Compose sempre carrega `.env` do diretório atual pra interpolar `${VAR}`
+no YAML (ex: `${DB_USER}` do serviço `db`), **mesmo rodando com `-f
+docker-compose.prod.yml`** — ele não troca automaticamente pra
+`.env.production`. Sem `--env-file .env.production` explícito, o `db` de
+produção sobe com as credenciais de dev (`user`/`pass`), enquanto o
+`backend` (que usa `env_file: .env.production`) tenta autenticar com as
+credenciais de prod — dá `InvalidPasswordError`. Todos os alvos `make
+prod-*`/`deploy*` do Makefile já passam `--env-file .env.production`; se
+rodar `docker compose` direto, não esqueça a flag.
+
+**Nunca rodar `make seed` contra produção** — o script cria usuários de
+teste com senha fraca (`scripts/seed.py`, documentado no README como "só
+para desenvolvimento"). Em produção, crie a conta real pela tela de
+registro.
+
+Histórico: até 2026-08-12 não havia essa separação — a stack de dev era o
+que ficava exposto em `easyprocess.ceciliap.com`, então qualquer teste
+manual local (inclusive bugs ainda não commitados) aparecia ao vivo no
+domínio público. Ver decisão registrada na tabela abaixo.
 
 ---
 
@@ -458,6 +518,7 @@ Descrição breve do que foi entregue nesta sprint.
 | Backend | FastAPI | Async nativo; tipagem forte com Pydantic; integração natural com IA |
 | Task queue | BackgroundTasks do FastAPI | Suficiente para MVP; Celery entra quando houver fila e múltiplos workers |
 | Banco de testes de integração | Compartilhado com o banco de dev (sem `TEST_DATABASE_URL` isolada) | Os testes de e2e do pipeline disparam `BackgroundTasks` real, que usa `AsyncSessionLocal` de produção — um banco de teste separado não seria visto pelo worker. Trade-off aceito: acumula tenants/usuários de teste no banco de dev (isolados por `tenant_id`, sem risco funcional). Revisar infra de teste/prod se o produto validar mercado (ver `docs/releases/RELEASE-S8.md`) |
+| Hospedagem de produção | Mesma máquina do dev ("claudinha"), stack Docker separada (`docker-compose.prod.yml`, projeto `easyprocess-prod`, porta 8393) | Sem staging/homologação — só separação dev/prod. Produção fica exposta via Cloudflare Tunnel (roteamento fixo, gerenciado no painel — não editável por aqui), então a porta 8393 é fixa para produção; dev foi realocado para outra porta. Migrar para VPS/PaaS fica em aberto se o produto crescer (2026-08-12) |
 
 ---
 
