@@ -78,6 +78,36 @@ class TestTranscriptionService:
         assert result.duration == 0.0
 
     @pytest.mark.asyncio
+    async def test_transcribe_echoed_prompt_raises_runtime_error(
+        self, service, tmp_path, mocker
+    ):
+        """Regressão: áudio silencioso fazia a Gemini "ecoar" o prompt de volta
+        como se fosse a transcrição, que era persistida como texto válido e só
+        era barrada tarde demais (na etapa de análise), deixando o processo em
+        "error" com a transcrição salva igual ao prompt."""
+        audio_file = tmp_path / "silent.wav"
+        audio_file.write_bytes(b"fake wav data")
+
+        mocker.patch.object(
+            service._client.aio.models,
+            "generate_content",
+            new=AsyncMock(
+                return_value=_make_response(
+                    _parsed(
+                        {
+                            "text": "Transcreva o áudio a seguir.",
+                            "language": "pt",
+                            "duration": 3.0,
+                        }
+                    )
+                )
+            ),
+        )
+
+        with pytest.raises(RuntimeError, match="Não foi possível identificar fala"):
+            await service.transcribe(str(audio_file))
+
+    @pytest.mark.asyncio
     async def test_transcribe_invalid_json_raises_runtime_error(
         self, service, tmp_path, mocker
     ):

@@ -14,6 +14,7 @@ class ProcessResponse(BaseModel):
     name: str
     status: str
     version: int
+    error_message: str | None
     transcription: str | None
     bpmn_xml: str | None
     summary: str | None

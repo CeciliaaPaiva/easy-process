@@ -53,6 +53,7 @@ export interface Process {
   tasks: Task[]
   version: number
   status: ProcessStatus
+  error_message?: string | null
   created_at: string
   updated_at: string
 }

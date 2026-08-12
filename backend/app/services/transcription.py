@@ -90,8 +90,25 @@ class TranscriptionService:
             )
             raise RuntimeError("Falha ao transcrever áudio: resposta inválida da IA")
 
+        text = parsed.text or ""
+        if text.strip() and text.strip() == _PROMPT.strip():
+            # Áudio sem fala identificável (ex: silêncio) faz o Gemini "ecoar"
+            # de volta a instrução do prompt como se fosse a transcrição, em vez
+            # de retornar texto vazio. Sem essa checagem, esse eco era persistido
+            # como transcrição válida e só era barrado (tarde demais) pela
+            # validação de tamanho mínimo em bpmn_analysis.analyze().
+            logger.error(
+                "Gemini ecoou o prompt como transcrição — áudio provavelmente "
+                "sem fala/silencioso: %r",
+                text[:200],
+            )
+            raise RuntimeError(
+                "Não foi possível identificar fala no áudio enviado. Verifique "
+                "se o arquivo contém áudio audível e tente novamente."
+            )
+
         return TranscriptionResult(
-            text=parsed.text,
+            text=text,
             language=parsed.language or "pt",
             duration=float(parsed.duration or 0.0),
         )

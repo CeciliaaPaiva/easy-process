@@ -113,4 +113,59 @@ class TestPipeline:
             f"/api/v1/processes/{process_id}",
             headers=auth["headers"],
         )
-        assert status_resp.json()["status"] == "error"
+        data = status_resp.json()
+        assert data["status"] == "error"
+        assert data["error_message"] == "Whisper falhou"
+
+    async def test_pipeline_error_message_reflects_short_transcription_failure(
+        self, client, mocker
+    ):
+        """Regressão: quando a transcrição vem curta/inválida demais para a
+        análise prosseguir, o processo ia para "error" sem nenhuma pista do
+        motivo na UI — só no log do servidor. Agora a mensagem da exceção
+        (levantada por analysis_service.analyze) fica em error_message."""
+        from tests.integration.conftest import register_user
+
+        auth = await register_user(client)
+        create_project = await client.post(
+            "/api/v1/projects",
+            json={"name": "Pipeline Short Transcription Test"},
+            headers=auth["headers"],
+        )
+        project_id = create_project.json()["id"]
+
+        mocker.patch(
+            "app.workers.process_audio.transcription_service.transcribe",
+            return_value=TranscriptionResult(text="Oi.", duration=1.0),
+        )
+        mocker.patch(
+            "app.workers.process_audio.analysis_service.analyze",
+            side_effect=ValueError(
+                "Transcrição muito curta ou vazia (mínimo 50 caracteres)"
+            ),
+        )
+        mocker.patch(
+            "app.api.v1.processes.save_audio",
+            return_value="/tmp/fake/audio.mp3",
+        )
+        mocker.patch("app.api.v1.processes.process_audio_pipeline")
+
+        upload_resp = await client.post(
+            f"/api/v1/projects/{project_id}/processes",
+            data={"name": "Processo Transcrição Curta"},
+            files={"audio": ("audio.mp3", b"fake", "audio/mpeg")},
+            headers=auth["headers"],
+        )
+        assert upload_resp.status_code == 201
+        process_id = uuid.UUID(upload_resp.json()["id"])
+
+        await process_audio_pipeline(process_id)
+
+        status_resp = await client.get(
+            f"/api/v1/processes/{process_id}",
+            headers=auth["headers"],
+        )
+        data = status_resp.json()
+        assert data["status"] == "error"
+        assert data["transcription"] == "Oi."
+        assert "mínimo 50 caracteres" in data["error_message"]

@@ -363,6 +363,9 @@ export default function ProcessPage() {
             <div className="flex flex-col items-center gap-3 text-center">
               <AlertTriangle size={40} className="text-red-400" />
               <p className="font-medium text-gray-700">Erro no processamento</p>
+              {proc.error_message && (
+                <p className="max-w-md text-sm text-gray-500">{proc.error_message}</p>
+              )}
               <Button variant="ghost" className="gap-1" onClick={() => window.location.reload()}>
                 <RefreshCw size={14} />
                 Tentar novamente

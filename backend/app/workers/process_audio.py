@@ -21,6 +21,7 @@ async def process_audio_pipeline(process_id: uuid.UUID) -> None:
             return
 
         try:
+            process.error_message = None
             await _update_status(db, process, "transcribing")
             logger.info("Iniciando transcrição do processo %s", process_id)
 
@@ -67,9 +68,10 @@ async def process_audio_pipeline(process_id: uuid.UUID) -> None:
             await _update_status(db, process, "ready")
             logger.info("Processo %s pronto", process_id)
 
-        except Exception:
+        except Exception as exc:
             logger.exception("Erro no pipeline do processo %s", process_id)
             process.status = "error"
+            process.error_message = str(exc)[:2000]
             await db.commit()
 
 
