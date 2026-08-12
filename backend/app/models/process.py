@@ -36,6 +36,7 @@ class Process(Base):
     status: Mapped[str] = mapped_column(
         String(50), default="pending", nullable=False, index=True
     )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
