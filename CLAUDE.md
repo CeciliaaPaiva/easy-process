@@ -227,7 +227,14 @@ Velocidade: **20 pontos/sprint** (1 desenvolvedor, sprints de 2 semanas)
 - JWT com expiração de 30min (access) + 7 dias (refresh)
 - Senhas com bcrypt cost factor 12
 - **Toda query filtra por `tenant_id`** via middleware — middleware não pode ser bypassado
-- Rate limiting no upload de áudio
+- Rate limiting em registro, login, upload de áudio e refinamento via chat
+  (`app/core/rate_limit.py`) — janela fixa por IP (registro/login) ou
+  tenant (upload/chat), com contador atômico em Postgres
+  (`rate_limit_buckets`), correto mesmo com múltiplos workers do gunicorn.
+  IP real extraído de `CF-Connecting-IP`/`X-Forwarded-For` (o app roda
+  atrás do Cloudflare Tunnel). Limites configuráveis via
+  `RATE_LIMIT_*` no `.env` (defaults: 5 registros/h, 10 logins/15min, 10
+  uploads/h, 30 mensagens de chat/h, por chave)
 - CORS restrito ao domínio do frontend
 - Variáveis sensíveis exclusivamente via `.env` — nunca no código ou logs
 - HTTPS obrigatório em produção

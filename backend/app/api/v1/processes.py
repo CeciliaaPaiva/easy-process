@@ -15,11 +15,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
-from app.models.process import Process, ProcessVersion
+from app.core.rate_limit import rate_limit_by_tenant
+from app.models.process import ChatMessage, Process, ProcessVersion
 from app.models.project import Project
 from app.models.user import User
-from app.models.process import ChatMessage
 from app.schemas.process import (
     BottleneckAnalysisResponse,
     BottleneckFindingResponse,
@@ -36,6 +37,13 @@ from app.services.storage import save_audio
 from app.workers.process_audio import process_audio_pipeline
 
 router = APIRouter(tags=["processes"])
+
+# Nomeados no nível do módulo (não inline no decorator) para que os testes
+# consigam sobrescrever via app.dependency_overrides — ver conftest.py.
+upload_rate_limit = rate_limit_by_tenant(
+    "upload", settings.RATE_LIMIT_UPLOAD_PER_HOUR, 3600
+)
+chat_rate_limit = rate_limit_by_tenant("chat", settings.RATE_LIMIT_CHAT_PER_HOUR, 3600)
 
 
 async def _get_project_or_404(
@@ -105,6 +113,7 @@ async def list_processes(
     "/projects/{project_id}/processes",
     status_code=status.HTTP_201_CREATED,
     response_model=ProcessResponse,
+    dependencies=[Depends(upload_rate_limit)],
 )
 async def upload_audio(
     project_id: uuid.UUID,
@@ -357,7 +366,11 @@ async def get_chat_history(
     return [ChatMessageResponse.model_validate(m) for m in rows]
 
 
-@router.post("/processes/{process_id}/chat", response_model=ChatResponse)
+@router.post(
+    "/processes/{process_id}/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(chat_rate_limit)],
+)
 async def send_chat_message(
     process_id: uuid.UUID,
     data: ChatRequest,

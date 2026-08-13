@@ -7,6 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_session
+from app.core.config import settings
+from app.core.rate_limit import rate_limit_by_ip
 from app.core.security import (
     TokenError,
     create_access_token,
@@ -26,6 +28,13 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Nomeados no nível do módulo (não inline no decorator) para que os testes
+# consigam sobrescrever via app.dependency_overrides — ver conftest.py.
+register_rate_limit = rate_limit_by_ip(
+    "register", settings.RATE_LIMIT_REGISTER_PER_HOUR, 3600
+)
+login_rate_limit = rate_limit_by_ip("login", settings.RATE_LIMIT_LOGIN_PER_15MIN, 900)
 
 
 def _slugify(text: str) -> str:
@@ -57,7 +66,10 @@ def _build_token_response(user: User) -> TokenResponse:
 
 
 @router.post(
-    "/register", status_code=status.HTTP_201_CREATED, response_model=TokenResponse
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TokenResponse,
+    dependencies=[Depends(register_rate_limit)],
 )
 async def register(
     data: RegisterRequest, db: AsyncSession = Depends(get_db_session)
@@ -90,7 +102,11 @@ async def register(
     return _build_token_response(user)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    dependencies=[Depends(login_rate_limit)],
+)
 async def login(
     data: LoginRequest, db: AsyncSession = Depends(get_db_session)
 ) -> TokenResponse:

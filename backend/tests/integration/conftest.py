@@ -5,6 +5,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.api.v1.auth import login_rate_limit, register_rate_limit
+from app.api.v1.processes import chat_rate_limit, upload_rate_limit
 from app.core.database import Base, get_db
 from app.main import create_app
 
@@ -45,6 +47,18 @@ async def client(engine):
 
     _app = create_app()
     _app.dependency_overrides[get_db] = override_get_db
+    # Rate limiting é testado isoladamente em test_rate_limit.py (a fixture
+    # `client` é reusada por toda a suíte via httpx.ASGITransport, que não
+    # simula IPs distintos — sem esse override, todo mundo compartilharia a
+    # mesma chave "ip:unknown" e testes não relacionados começariam a tomar
+    # 429 dependendo da ordem/volume de execução).
+    for dep in (
+        register_rate_limit,
+        login_rate_limit,
+        upload_rate_limit,
+        chat_rate_limit,
+    ):
+        _app.dependency_overrides[dep] = lambda: None
 
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
