@@ -40,6 +40,16 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
+    # ─── Rate limiting ──────────────────────────────────────────────────────
+    # Janela fixa por chave (ver app/core/rate_limit.py). Uploads e chat são
+    # limitados por tenant (custo de IA); registro e login são limitados por
+    # IP (abuso/força bruta), lidos de CF-Connecting-IP/X-Forwarded-For já
+    # que o app roda atrás do Cloudflare Tunnel em produção.
+    RATE_LIMIT_REGISTER_PER_HOUR: int = 5
+    RATE_LIMIT_LOGIN_PER_15MIN: int = 10
+    RATE_LIMIT_UPLOAD_PER_HOUR: int = 10
+    RATE_LIMIT_CHAT_PER_HOUR: int = 30
+
     ENVIRONMENT: str = "development"
 
     @property
