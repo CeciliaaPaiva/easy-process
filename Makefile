@@ -4,7 +4,8 @@
         migrate migration seed \
         shell-backend shell-db \
         reset-db \
-        deploy deploy-migrate
+        deploy deploy-migrate \
+        prod-up prod-down prod-logs prod-migrate prod-shell-db
 
 # ─── Serviços ──────────────────────────────────────────────────────────────────
 
@@ -77,15 +78,31 @@ reset-db:
 
 deploy:
 	@echo "Subindo em produção..."
-	docker compose -f docker-compose.prod.yml pull
-	docker compose -f docker-compose.prod.yml up -d --build
-	docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+	docker compose -f docker-compose.prod.yml --env-file .env.production pull
+	docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+	docker compose -f docker-compose.prod.yml --env-file .env.production exec backend alembic upgrade head
 	@echo "Deploy concluído. Verificando saúde..."
 	@sleep 5
-	docker compose -f docker-compose.prod.yml ps
+	docker compose -f docker-compose.prod.yml --env-file .env.production ps
 
 deploy-migrate:
-	docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+	docker compose -f docker-compose.prod.yml --env-file .env.production exec backend alembic upgrade head
+
+# Operação do dia a dia da stack de produção (sem rebuild — use "deploy" pra isso)
+prod-up:
+	docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+
+prod-down:
+	docker compose -f docker-compose.prod.yml --env-file .env.production down
+
+prod-logs:
+	docker compose -f docker-compose.prod.yml --env-file .env.production logs -f
+
+prod-migrate:
+	docker compose -f docker-compose.prod.yml --env-file .env.production exec backend alembic upgrade head
+
+prod-shell-db:
+	docker compose -f docker-compose.prod.yml --env-file .env.production exec db psql -U $${DB_USER:-easy_process_prod} -d $${DB_NAME:-easy_process_prod}
 
 # ─── Shells ───────────────────────────────────────────────────────────────────
 

@@ -60,3 +60,4 @@ logs/
 
 # ─── Alembic ──────────────────────────────────────────────────────────────────
 # Não ignorar versions/ — migrations são versionadas no git
+backups/

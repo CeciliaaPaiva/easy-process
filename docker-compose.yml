@@ -1,8 +1,10 @@
+name: easyprocess-dev
+
 services:
   frontend:
     build: ./frontend
     ports:
-      - "8393:3000"
+      - "8104:3000"
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
